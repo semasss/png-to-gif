@@ -6,7 +6,7 @@ const { execSync } = require('child_process');
 function run(command) {
   console.log(`[afterPack] Executing: ${command}`);
   try {
-    return execSync(command, { stdio: 'pipe', timeout: 30000 }).toString().trim();
+    return execSync(command, { stdio: 'pipe' }).toString().trim();
   } catch (e) {
     console.error(`[afterPack] Command failed: ${command}`);
     const stderr = e.stderr ? e.stderr.toString().trim() : '(no stderr)';
@@ -71,57 +71,67 @@ exports.default = async function(context) {
   const otoolOutput = run(`otool -L "${magickBin}"`);
   console.log(`[afterPack] Current paths:\n${otoolOutput}`);
 
-  // 4. Принудительно исправляем пути
-  console.log(`[afterPack] Forcibly correcting library paths...`);
-  
-  // Добавляем rpath если его нет
-  try {
-    run(`install_name_tool -add_rpath "@executable_path/../libs" "${magickBin}"`);
-    console.log(`[afterPack] Added @rpath to magick binary`);
-  } catch (e) {
-    // Rpath уже может существовать, это нормально
-    console.log(`[afterPack] Note: rpath might already exist (this is OK)`);
-  }
+  // 4. Если пути неправильные, исправляем их
+  const needsFixing = otoolOutput.includes('/usr/local/') || 
+                      otoolOutput.includes('/opt/homebrew/') ||
+                      !otoolOutput.includes('@executable_path/../libs/');
 
-  // Исправляем пути для всех библиотек
-  const allBinaries = [magickBin, ...libs.map(f => path.join(libsDir, f))];
-
-  for (const binary of allBinaries) {
-    const binaryName = path.basename(binary);
-    console.log(`[afterPack] Processing: ${binaryName}`);
+  if (needsFixing) {
+    console.log(`[afterPack] Library paths need fixing...`);
     
-    // Получаем зависимости
-    const dependencies = run(`otool -L "${binary}"`)
-      .split('\n')
-      .slice(1)
-      .map(line => line.trim().split(' ')[0])
-      .filter(dep => dep && !dep.startsWith('/System/') && !dep.startsWith('/usr/lib/'));
+    // Добавляем rpath если его нет
+    try {
+      run(`install_name_tool -add_rpath "@executable_path/../libs" "${magickBin}"`);
+      console.log(`[afterPack] Added @rpath to magick binary`);
+    } catch (e) {
+      // Rpath уже может существовать, это нормально
+      console.log(`[afterPack] Note: rpath might already exist (this is OK)`);
+    }
 
-    for (const dep of dependencies) {
-      const depName = path.basename(dep);
+    // Исправляем пути для всех библиотек
+    const allBinaries = [magickBin, ...libs.map(f => path.join(libsDir, f))];
+
+    for (const binary of allBinaries) {
+      const binaryName = path.basename(binary);
+      console.log(`[afterPack] Processing: ${binaryName}`);
       
-      // Если это одна из наших библиотек
-      if (libs.includes(depName)) {
-        const newPath = `@executable_path/../libs/${depName}`;
-        try {
-          run(`install_name_tool -change "${dep}" "${newPath}" "${binary}"`);
-          console.log(`[afterPack]   Changed: ${dep} -> ${newPath}`);
-        } catch (e) {
-          console.error(`[afterPack]   Failed to change path: ${e.message}`);
+      // Получаем зависимости
+      const dependencies = run(`otool -L "${binary}"`)
+        .split('\n')
+        .slice(1)
+        .map(line => line.trim().split(' ')[0])
+        .filter(dep => dep && !dep.startsWith('/System/') && !dep.startsWith('/usr/lib/'));
+
+      for (const dep of dependencies) {
+        const depName = path.basename(dep);
+        
+        // Если это одна из наших библиотек
+        if (libs.includes(depName)) {
+          const newPath = `@executable_path/../libs/${depName}`;
+          try {
+            run(`install_name_tool -change "${dep}" "${newPath}" "${binary}"`);
+            console.log(`[afterPack]   Changed: ${dep} -> ${newPath}`);
+          } catch (e) {
+            console.error(`[afterPack]   Failed to change path: ${e.message}`);
+          }
         }
       }
     }
+  } else {
+    console.log(`[afterPack] Library paths are already correct!`);
   }
 
-  // 5. Ad-hoc sign all binaries to satisfy macOS Gatekeeper
-  console.log(`[afterPack] Ad-hoc signing binaries for macOS...`);
-  const binariesToSign = [magickBin, ...libs.map(f => path.join(libsDir, f))];
-  for (const binary of binariesToSign) {
+  // 5. Удаляем подпись если она есть (для локальной разработки)
+  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') {
+    console.log(`[afterPack] Removing code signatures for local development...`);
     try {
-      run(`codesign --force --deep -s - "${binary}"`);
-      console.log(`[afterPack]   Signed ${path.basename(binary)}`);
+      run(`codesign --remove-signature "${magickBin}"`);
+      libs.forEach(lib => {
+        run(`codesign --remove-signature "${path.join(libsDir, lib)}"`);
+      });
+      console.log(`[afterPack] Code signatures removed`);
     } catch (e) {
-      console.error(`[afterPack]   Failed to sign ${path.basename(binary)}: ${e.message}`);
+      console.log(`[afterPack] Note: Could not remove signatures (they might not exist)`);
     }
   }
 
@@ -135,4 +145,4 @@ exports.default = async function(context) {
   }
 
   console.log('[afterPack] Post-processing completed');
-}; 
+};
