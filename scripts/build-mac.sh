@@ -4,7 +4,6 @@
 set -e
 
 echo "Building PNG to GIF Converter for macOS..."
-cd "/Users/tsekh/Documents/png-to-gif-converter"
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
