@@ -30,6 +30,15 @@ const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
 const ditherRadios = document.querySelectorAll('input[name="dither"]');
 
+// Проверка наличия ImageMagick при запуске
+document.addEventListener('DOMContentLoaded', async () => {
+  const isImageMagickAvailable = await window.electronAPI.checkImageMagick();
+  if (!isImageMagickAvailable) {
+    showStatus('Внимание: ImageMagick не найден. Установите его и перезапустите приложение. Инструкции в README.', 'error');
+    convertButton.disabled = true;
+  }
+});
+
 // Загрузка ASCII логотипа
 fetch('logo.txt')
   .then(response => response.text())
@@ -133,6 +142,7 @@ convertButton.addEventListener('click', async () => {
   
   for (const [groupName, files] of Object.entries(groupedFiles)) {
     try {
+      progressText.textContent = `Конвертируется группа: ${groupName}...`;
       const result = await window.electronAPI.convertToGif({
         groupName: groupName,
         pngFilePaths: files.map(f => f.path),
@@ -162,12 +172,15 @@ convertButton.addEventListener('click', async () => {
     }
   }
   
-  if (completedGroups === totalGroups) {
+  if (completedGroups === totalGroups && completedGroups > 0) {
     showStatus(`Успешно сконвертировано ${completedGroups} групп файлов!`, 'success');
     displayResults();
+  } else {
+    progressContainer.style.display = 'none';
   }
   
   convertButton.disabled = false;
+  progressText.textContent = '';
 });
 
 // Отображение результатов

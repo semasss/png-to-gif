@@ -2,11 +2,32 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
-const { Image } = require('image-js');
-const GIFEncoder = require('gif-encoder-2');
-const sharp = require('sharp');
+const im = require('imagemagick');
+const { exec } = require('child_process');
 
 let mainWindow;
+
+// Функция для проверки, доступен ли ImageMagick
+function checkImageMagick() {
+  return new Promise((resolve) => {
+    exec('magick --version', (error) => {
+      if (error) {
+        // Попробуем старую команду 'convert'
+        exec('convert --version', (error2) => {
+          if (error2) {
+            resolve(false);
+          } else {
+            // 'convert' работает, используем его
+            im.command = 'convert';
+            resolve(true);
+          }
+        });
+      } else {
+        resolve(true);
+      }
+    });
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -44,23 +65,23 @@ app.on('activate', () => {
 
 // Получение информации о GIF файле
 async function getGifInfo(filePath) {
-  try {
-    const stats = fs.statSync(filePath);
-    const image = await sharp(filePath);
-    const metadata = await image.metadata();
-    
-    return {
-      success: true,
-      size: stats.size,
-      dimensions: {
-        width: metadata.width,
-        height: metadata.height
+  return new Promise((resolve) => {
+    im.identify(filePath, (err, features) => {
+      if (err) {
+        console.error('Error getting GIF info:', err);
+        resolve({ success: false, error: err.message });
+        return;
       }
-    };
-  } catch (error) {
-    console.error('Error getting GIF info:', error);
-    return { success: false, error: error.message };
-  }
+      resolve({
+        success: true,
+        size: features.filesize ? parseInt(features.filesize) : fs.statSync(filePath).size,
+        dimensions: {
+          width: features.width,
+          height: features.height
+        }
+      });
+    });
+  });
 }
 
 // Обработчики IPC
@@ -73,6 +94,10 @@ ipcMain.handle('choose-directory', async () => {
     return { success: true, path: result.filePaths[0] };
   }
   return { success: false, error: 'Директория не выбрана' };
+});
+
+ipcMain.handle('check-imagemagick', async () => {
+  return await checkImageMagick();
 });
 
 ipcMain.handle('get-gif-info', async (event, { filePath, ditherType }) => {
@@ -125,93 +150,76 @@ ipcMain.handle('get-png-files', async (event, directory) => {
   return await getPngFiles(directory);
 });
 
-// Convert multiple PNGs to GIF
+// Convert multiple PNGs to GIF using ImageMagick
 async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType) {
-  try {
-    const firstImage = await sharp(pngFilePaths[0]);
-    const metadata = await firstImage.metadata();
-    const { width, height } = metadata;
-
-    // Определяем тип дизеринга
-    const dither = ditherType !== 'none';
-
-    const encoder = new GIFEncoder(width, height);
-    encoder.start();
-    encoder.setRepeat(0);
-    encoder.setDelay(frameDelay);
-    encoder.setQuality(10);
-
-    for (const pngPath of pngFilePaths) {
-      let image_pipeline = sharp(pngPath);
-      if(dither) {
-        image_pipeline = image_pipeline.png({
-          palette: true,
-          colours: colorCount,
-          dither: 1.0,
-        })
-      }
-      const { data } = await image_pipeline.raw().toBuffer({ resolveWithObject: true });
-      encoder.addFrame(data);
-    }
-
-    encoder.finish();
-    const buffer = encoder.out.getData();
-    let finalBuffer = buffer;
-    let finalWidth = width;
-    let finalHeight = height;
-
-    if (buffer.length > maxKB * 1024) {
-      const scale = Math.sqrt((maxKB * 1024) / buffer.length);
-      const newWidth = Math.round(width * scale);
-      const newHeight = Math.round(height * scale);
-      finalWidth = newWidth;
-      finalHeight = newHeight;
-
-      const resizedEncoder = new GIFEncoder(newWidth, newHeight);
-      resizedEncoder.start();
-      resizedEncoder.setRepeat(0);
-      resizedEncoder.setDelay(frameDelay);
-      resizedEncoder.setQuality(10);
-
-      for (const pngPath of pngFilePaths) {
-        let image_pipeline = sharp(pngPath).resize(newWidth, newHeight);
-
-        if(dither) {
-          image_pipeline = image_pipeline.png({
-            palette: true,
-            colours: colorCount,
-            dither: 1.0,
-          })
-        }
-
-        const image = await image_pipeline
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-        resizedEncoder.addFrame(image.data);
-      }
-
-      resizedEncoder.finish();
-      finalBuffer = resizedEncoder.out.getData();
-    }
-
+  return new Promise((resolve, reject) => {
     const outputPath = path.join(outputDir, `${groupName}.gif`);
-    fs.writeFileSync(outputPath, finalBuffer);
-    return { 
-      success: true, 
-      path: outputPath,
-      ditherType,
-      size: finalBuffer.length,
-      dimensions: {
-        width: finalWidth,
-        height: finalHeight
+    const frameDelayTicks = Math.round(frameDelay / 10); // convert ms to ticks (1/100s)
+
+    const args = [
+      '-delay', frameDelayTicks,
+      '-loop', '0',
+      ...pngFilePaths,
+    ];
+
+    // Настройки палитры и дизеринга
+    args.push('-layers', 'Optimize');
+    args.push('+map');
+    if (ditherType !== 'none') {
+      args.push('-dither', ditherType);
+    }
+    args.push('-colors', colorCount);
+    
+    args.push(outputPath);
+
+    im.convert(args, async (err) => {
+      if (err) {
+        console.error('Error converting to GIF:', err);
+        return reject({ success: false, error: err.message });
       }
-    };
-  } catch (error) {
-    console.error('Error converting to GIF:', error);
-    return { success: false, error: error.message };
-  }
+
+      // Проверяем размер файла и изменяем, если нужно
+      const stats = fs.statSync(outputPath);
+      const sizeInKB = stats.size / 1024;
+
+      if (sizeInKB > maxKB) {
+        const scale = Math.floor(Math.sqrt(maxKB / sizeInKB) * 100);
+        const resizeArgs = [
+          outputPath,
+          '-resize', `${scale}%`,
+          outputPath
+        ];
+        im.convert(resizeArgs, async (resizeErr) => {
+          if (resizeErr) {
+            console.error('Error resizing GIF:', resizeErr);
+            return reject({ success: false, error: resizeErr.message });
+          }
+          const finalInfo = await getGifInfo(outputPath);
+          resolve({
+            success: true,
+            path: outputPath,
+            ditherType: ditherType,
+            ...finalInfo
+          });
+        });
+      } else {
+        const finalInfo = await getGifInfo(outputPath);
+        resolve({
+          success: true,
+          path: outputPath,
+          ditherType: ditherType,
+          ...finalInfo
+        });
+      }
+    });
+  });
 }
 
 ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType }) => {
-  return await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
+  try {
+    const result = await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
+    return result;
+  } catch (error) {
+    return error;
+  }
 });

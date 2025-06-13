@@ -442,13 +442,12 @@
           </select>
         </div>
         <div class="setting-group">
-          <label>Тип дизеринга:</label>
-          <div class="dither-toggle-group">
-            <label><input type="radio" name="dither" value="none" checked> Нет</label>
-            <label><input type="radio" name="dither" value="floydsteinberg"> Diffusion (Floyd-Steinberg)</label>
-            <label><input type="radio" name="dither" value="bayer"> Bayer</label>
-            <label><input type="radio" name="dither" value="atkinson"> Atkinson</label>
-            <label><input type="radio" name="dither" value="random"> Random</label>
+          <label for="dither-options">Дизеринг</label>
+          <div id="dither-options" class="radio-group">
+            <label><input type="radio" name="dither" value="none" checked> None</label>
+            <label><input type="radio" name="dither" value="FloydSteinberg"> FloydSteinberg</label>
+            <label><input type="radio" name="dither" value="Riemersma"> Riemersma</label>
+            <label><input type="radio" name="dither" value="CheckerBoard"> CheckerBoard</label>
           </div>
         </div>
       </div>
