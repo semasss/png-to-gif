@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Exit on error
+set -e
+
+echo "Building PNG to GIF Converter for macOS..."
+cd "/Users/tsekh/Documents/png-to-gif-converter"
+
+# Check if Node.js is installed
+if ! command -v node &> /dev/null; then
+    echo "Node.js is not installed. Please install Node.js first."
+    exit 1
+fi
+
+# Install dependencies if needed
+if [ ! -d "node_modules" ]; then
+    echo "Installing dependencies..."
+    npm install
+fi
+
+# Build the app
+echo "Building the app..."
+npm run build-mac
+
+echo "Build complete! You can find the DMG file in the dist folder."
