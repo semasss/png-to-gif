@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 const { spawn } = require('child_process');
+const { shell } = require('electron');
 
 let mainWindow;
 
@@ -116,13 +117,27 @@ function checkImageMagick() {
 }
 
 function createWindow() {
+    const configPath = path.join(__dirname, 'config.json');
+    const defaultConfig = { maxKb: 10, frameDelay: 0.1, colorCount: 256, dither: 'none' };
+    let config = defaultConfig;
+    try {
+        if (fs.existsSync(configPath)) {
+            config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } else {
+            fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 4));
+        }
+    } catch (error) {
+        console.error('Error with config file:', error);
+    }
+
     mainWindow = new BrowserWindow({
         width: 800,
         height: 600,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js')
+            preload: path.join(__dirname, 'preload.js'),
+            config: config
         }
     });
 
@@ -239,60 +254,108 @@ ipcMain.handle('get-png-files', async (event, directory) => {
     return await getPngFiles(directory);
 });
 
+ipcMain.handle('open-folder', (event, folderPath) => {
+    shell.openPath(folderPath);
+});
+
+ipcMain.handle('get-config', () => {
+    const configPath = path.join(__dirname, 'config.json');
+    const defaultConfig = { maxKb: 10, frameDelay: 0.1, colorCount: 256, dither: 'none' };
+    try {
+        if (fs.existsSync(configPath)) {
+            return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        }
+    } catch (error) {
+        console.error('Error reading config file for renderer:', error);
+    }
+    return defaultConfig;
+});
+
 // Convert multiple PNGs to GIF using ImageMagick
-async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType) {
-    const outputPath = path.join(outputDir, `${groupName}.gif`);
-    const frameDelayTicks = Math.round(frameDelay / 10); // convert ms to ticks (1/100s)
-
-    const args = [
-        'convert',
-        '-delay', frameDelayTicks.toString(),
-        '-loop', '0',
-        ...pngFilePaths,
-    ];
-
-    // Настройки палитры и дизеринга
-    args.push('-layers', 'Optimize');
-    args.push('+map');
-    if (ditherType !== 'none') {
-        args.push('-dither', ditherType);
+async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, initialColorCount, ditherType) {
+    const gifFolder = path.join(outputDir, 'GIF');
+    if (!fs.existsSync(gifFolder)) {
+        fs.mkdirSync(gifFolder);
     }
-    args.push('-colors', colorCount.toString());
-    
-    args.push(outputPath);
 
-    await runMagick(args);
+    const outputPath = path.join(gifFolder, `${groupName}.gif`);
+    const frameDelayTicks = Math.round(frameDelay / 10);
 
-    // Проверяем размер файла и изменяем, если нужно
-    const stats = fs.statSync(outputPath);
-    const sizeInKB = stats.size / 1024;
+    let colorCount = initialColorCount;
+    const colorSteps = [256, 128, 64, 32];
+    let finalSize = 0;
+    let colorsReduced = false;
 
-    if (sizeInKB > maxKB) {
-        console.log(`[RESIZE] GIF слишком большой (${sizeInKB.toFixed(2)}KB > ${maxKB}KB). Изменяю размер...`);
-        const scale = Math.floor(Math.sqrt(maxKB / sizeInKB) * 100);
-        const resizeArgs = [
+    for (const colors of colorSteps) {
+        if (colors > initialColorCount && initialColorCount !== colors) continue;
+        colorCount = colors;
+
+        const args = [
             'convert',
-            outputPath,
-            '-resize', `${scale}%`,
-            outputPath
+            '-delay', frameDelayTicks.toString(),
+            '-loop', '0',
+            ...pngFilePaths,
+            '+map'
         ];
-        await runMagick(resizeArgs);
+
+        if (ditherType !== 'none') {
+            args.push('-dither', ditherType);
+        }
+
+        args.push('-colors', colorCount.toString());
+        args.push('-layers', 'optimize');
+        args.push(outputPath);
+
+        try {
+            await runMagick(args);
+            const stats = fs.statSync(outputPath);
+            finalSize = stats.size;
+
+            if (finalSize <= maxKB * 1024) {
+                if (colorCount < initialColorCount) {
+                    colorsReduced = true;
+                }
+                break; 
+            }
+        } catch (err) {
+            console.error('Error converting to GIF:', err);
+            return { success: false, error: err.message };
+        }
     }
+
+    const reportPath = path.join(gifFolder, 'report.txt');
+    let reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, 'utf-8') : '';
     
-    const finalInfo = await getGifInfo(outputPath);
-    return {
-        success: true,
-        path: outputPath,
-        ditherType: ditherType,
-        ...finalInfo
-    };
+    if (!reportContent.includes('ЖИФ Конвертер - Отчет о конвертации')) {
+        reportContent = `
+ЖИФ Конвертер - Отчет о конвертации
+=====================================
+Дата: ${new Date().toLocaleString()}
+
+Настройки (изначальные):
+-------------------------
+Максимальный размер файла: ${maxKB / 1024} MB
+Задержка между кадрами: ${frameDelay} ms
+Количество цветов: ${initialColorCount}
+Дизеринг: ${ditherType}
+
+Результаты:
+-----------
+`;
+    }
+
+    reportContent += `
+* ${groupName}.gif:
+  - Размер: ${(finalSize / 1024 / 1024).toFixed(2)} MB
+  - Количество цветов: ${colorCount}${colorsReduced ? ` (уменьшено с ${initialColorCount})` : ''}
+`;
+
+    fs.writeFileSync(reportPath, reportContent);
+
+    const info = await getGifInfo(outputPath);
+    return { ...info, path: outputPath, ditherType, colorsReduced, finalColorCount: colorCount, initialColorCount };
 }
 
 ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType }) => {
-    try {
-        const result = await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
-        return result;
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
+    return await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
 });

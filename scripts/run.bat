@@ -1,5 +1,5 @@
 @echo off
-echo Setting up PNG to GIF Converter...
+echo Setting up ЖИФ...
 cd "%~dp0"
 
 REM Check if Node.js is installed

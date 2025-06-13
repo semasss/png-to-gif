@@ -1,5 +1,5 @@
 @echo off
-echo Building PNG to GIF Converter for Windows...
+echo Building ЖИФ for Windows...
 cd "%~dp0"
 
 REM Check if Node.js is installed

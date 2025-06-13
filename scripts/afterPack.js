@@ -1,17 +1,34 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 // Helper to run commands and log them
-function run(command) {
+function run(command, timeout = 30000) { // 30 секунд по умолчанию
   console.log(`[afterPack] Executing: ${command}`);
-  try {
-    return execSync(command, { stdio: 'pipe' }).toString().trim();
-  } catch (e) {
+  
+  // Используем spawnSync для лучшего контроля, особенно для таймаутов
+  const [cmd, ...args] = command.split(' ');
+  const result = spawnSync(cmd, args, { 
+    stdio: 'pipe', 
+    encoding: 'utf-8', 
+    timeout: timeout,
+    shell: true // Важно для команд с кавычками и путями
+  });
+
+  if (result.status === 0) {
+    return result.stdout.trim();
+  } else {
+    const error = result.error || new Error(`Command failed with status ${result.status}`);
+    const stderr = result.stderr ? result.stderr.trim() : '(no stderr)';
     console.error(`[afterPack] Command failed: ${command}`);
-    const stderr = e.stderr ? e.stderr.toString().trim() : '(no stderr)';
     console.error(`[afterPack] stderr: ${stderr}`);
-    throw e;
+    console.error(`[afterPack] error:`, error.message);
+
+    if (result.signal) {
+      console.error(`[afterPack] Command was killed with signal: ${result.signal}`);
+    }
+
+    throw error;
   }
 }
 
@@ -137,15 +154,6 @@ exports.default = async function(context) {
     } catch (e) {
       console.log(`[afterPack] Note: Could not remove signatures (they might not exist)`);
     }
-  }
-
-  // 6. Финальная проверка
-  console.log(`[afterPack] Final verification...`);
-  try {
-    const testOutput = run(`"${magickBin}" --version`);
-    console.log(`[afterPack] ImageMagick test successful:\n${testOutput}`);
-  } catch (e) {
-    console.error(`[afterPack] WARNING: ImageMagick test failed: ${e.message}`);
   }
 
   console.log('[afterPack] Post-processing completed');

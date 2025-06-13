@@ -3,7 +3,7 @@
 # Exit on error
 set -e
 
-echo "Building PNG to GIF Converter for macOS..."
+echo "Building ЖИФ for macOS..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then

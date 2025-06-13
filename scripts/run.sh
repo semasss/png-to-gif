@@ -3,7 +3,7 @@
 # Exit on error
 set -e
 
-echo "Setting up PNG to GIF Converter..."
+echo "Setting up ЖИФ..."
 cd "$(dirname "$0")"
 
 # Check if Node.js is installed

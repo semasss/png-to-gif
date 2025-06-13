@@ -6,8 +6,6 @@ let groupedFiles = {};
 let conversionResults = [];
 let ditherType = 'none';
 
-let defaultConfig = {};
-
 // DOM Elements
 const directoryDisplay = document.getElementById('directory-display');
 const chooseDirectoryBtn = document.getElementById('choose-directory');
@@ -30,57 +28,24 @@ const infoButton = document.getElementById('info-button');
 const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
-const ditherSelect = document.getElementById('dither-select');
-const ditherExplanation = document.getElementById('dither-explanation');
-const openFolderBtn = document.getElementById('open-folder-button');
-
-const ditherExplanations = {
-    'none': 'Дизеринг отключен. Могут быть заметны резкие переходы между цветами.',
-    'FloydSteinberg': 'Алгоритм диффузии ошибки. Создает плавные переходы, хорошо подходит для фотографий.',
-    'Riemersma': 'Алгоритм, основанный на кривой Гильберта. Дает более структурированный, но менее шумный результат, чем Floyd-Steinberg.'
-};
-
-function updateDitherExplanation() {
-    ditherType = ditherSelect.value;
-    ditherExplanation.textContent = ditherExplanations[ditherType];
-}
-
-// Загрузка и применение конфига
-async function loadAndApplyConfig() {
-    defaultConfig = await window.electronAPI.getConfig();
-    maxKBInput.value = defaultConfig.maxKb;
-    frameDelayInput.value = defaultConfig.frameDelay;
-    colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither;
-    ditherSelect.value = ditherType;
-    updateDitherExplanation();
-}
+const ditherRadios = document.querySelectorAll('input[name="dither"]');
 
 // Проверка наличия ImageMagick при запуске
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadAndApplyConfig();
-    const isImageMagickAvailable = await window.electronAPI.checkImageMagick();
-    if (!isImageMagickAvailable) {
-        showStatus('Внимание: ImageMagick не найден. Установите его и перезапустите приложение. Инструкции в README.', 'error');
-        convertButton.disabled = true;
-    }
+  const isImageMagickAvailable = await window.electronAPI.checkImageMagick();
+  if (!isImageMagickAvailable) {
+    showStatus('Внимание: ImageMagick не найден. Установите его и перезапустите приложение. Инструкции в README.', 'error');
+    convertButton.disabled = true;
+  }
 });
 
 // Загрузка ASCII логотипа
-fetch('assets/logo.txt')
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Файл logo.txt не найден');
-        }
-        return response.text();
-    })
-    .then(text => {
-        asciiLogo.textContent = text;
-    })
-    .catch(error => {
-        console.error('Ошибка загрузки логотипа:', error);
-        asciiLogo.textContent = 'Ошибка: не удалось загрузить logo.txt.\n\nПожалуйста, поместите файл logo.txt в папку src/.';
-    });
+fetch('logo.txt')
+  .then(response => response.text())
+  .then(text => {
+    asciiLogo.textContent = text;
+  })
+  .catch(error => console.error('Error loading logo:', error));
 
 // Обработчики событий для модального окна
 infoButton.addEventListener('click', () => {
@@ -99,25 +64,15 @@ infoModal.addEventListener('click', (e) => {
 
 // Обработчик сброса настроек
 resetSettingsBtn.addEventListener('click', () => {
-    maxKBInput.value = defaultConfig.maxKb;
-    frameDelayInput.value = defaultConfig.frameDelay;
-    colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither;
-    ditherSelect.value = ditherType;
-    updateDitherExplanation();
+  maxKBInput.value = '10';
+  frameDelayInput.value = '0.1';
+  colorCountSelect.value = '256';
 });
 
 // Обработчик кнопки "Назад"
 backButton.addEventListener('click', () => {
   mainPage.classList.add('active');
   resultsPage.classList.remove('active');
-});
-
-openFolderBtn.addEventListener('click', () => {
-    if (selectedDirectory) {
-        const gifFolder = selectedDirectory + '/GIF';
-        window.electronAPI.openFolder(gifFolder);
-    }
 });
 
 // Выбор директории
@@ -207,10 +162,7 @@ convertButton.addEventListener('click', async () => {
           name: groupName,
           size: result.size,
           dimensions: result.dimensions,
-          ditherType: result.ditherType,
-          colorsReduced: result.colorsReduced,
-          finalColorCount: result.finalColorCount,
-          initialColorCount: result.initialColorCount
+          ditherType: result.ditherType
         });
       } else {
         showStatus(`Ошибка при конвертации группы ${groupName}: ${result.error}`, 'error');
@@ -239,11 +191,6 @@ function displayResults() {
     const card = document.createElement('div');
     card.className = 'result-card';
     
-    let colorInfo = `<p>Цветов: ${result.finalColorCount}</p>`;
-    if (result.colorsReduced) {
-        colorInfo = `<p>Цветов: ${result.finalColorCount} (уменьшено с ${result.initialColorCount})</p>`;
-    }
-
     card.innerHTML = `
       <img src="file://${result.path}" alt="${result.name}">
       <div class="result-info">
@@ -251,7 +198,6 @@ function displayResults() {
         <p>Размер: ${(result.size / 1024 / 1024).toFixed(2)} МБ</p>
         <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}px</p>
         <p>Дизеринг: ${result.ditherType}</p>
-        ${colorInfo}
       </div>
     `;
     
@@ -280,4 +226,9 @@ function showStatus(message, type) {
   }, 5000);
 }
 
-ditherSelect.addEventListener('change', updateDitherExplanation);
+ditherRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    ditherType = radio.value;
+  });
+  if (radio.checked) ditherType = radio.value;
+});

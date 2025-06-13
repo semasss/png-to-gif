@@ -1,10 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  checkImageMagick: () => ipcRenderer.invoke('check-imagemagick'),
   chooseDirectory: () => ipcRenderer.invoke('choose-directory'),
   getPngFiles: (directoryPath) => ipcRenderer.invoke('get-png-files', directoryPath),
-  convertToGif: (options) => ipcRenderer.invoke('convert-to-gif', options),
-  getConfig: () => ipcRenderer.invoke('get-config'),
-  openFolder: (path) => ipcRenderer.invoke('open-folder', path)
+  convertToGif: (options) => ipcRenderer.invoke('convert-to-gif', options)
 });
