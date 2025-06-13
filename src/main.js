@@ -332,12 +332,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDela
 =====================================
 Дата: ${new Date().toLocaleString()}
 
-Настройки (изначальные):
--------------------------
-Максимальный размер файла: ${maxKB / 1024} MB
-Задержка между кадрами: ${frameDelay} ms
-Количество цветов: ${initialColorCount}
-Дизеринг: ${ditherType}
+Настройки (изначальные):\n-------------------------\n- Максимальный размер файла: ${maxKB} КБ\nЗадержка между кадрами: ${frameDelay} ms\nКоличество цветов: ${initialColorCount}\nДизеринг: ${ditherType}\n
 
 Результаты:
 -----------
@@ -346,7 +341,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDela
 
     reportContent += `
 * ${groupName}.gif:
-  - Размер: ${(finalSize / 1024 / 1024).toFixed(2)} MB
+  - Размер: ${(finalSize / 1024).toFixed(1)} КБ
   - Количество цветов: ${colorCount}${colorsReduced ? ` (уменьшено с ${initialColorCount})` : ''}
 `;
 

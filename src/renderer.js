@@ -4,7 +4,7 @@ let selectedDirectory = null;
 let pngFiles = [];
 let groupedFiles = {};
 let conversionResults = [];
-let ditherType = 'none';
+let ditherType = 'FloydSteinberg';
 
 let defaultConfig = {};
 
@@ -26,7 +26,7 @@ const mainPage = document.getElementById('main-page');
 const resultsPage = document.getElementById('results-page');
 const backButton = document.getElementById('back-button');
 const resultsGrid = document.getElementById('results-grid');
-const infoButton = document.getElementById('info-button');
+const infoButton = document.getElementById('info-link');
 const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
@@ -35,9 +35,9 @@ const ditherExplanation = document.getElementById('dither-explanation');
 const openFolderBtn = document.getElementById('open-folder-button');
 
 const ditherExplanations = {
-    'none': 'Дизеринг отключен. Могут быть заметны резкие переходы между цветами.',
-    'FloydSteinberg': 'Алгоритм диффузии ошибки. Создает плавные переходы, хорошо подходит для фотографий.',
-    'Riemersma': 'Алгоритм, основанный на кривой Гильберта. Дает более структурированный, но менее шумный результат, чем Floyd-Steinberg.'
+    'none': 'Без дизеринга. Возможны резкие переходы между цветами.',
+    'FloydSteinberg': 'Floyd–Steinberg — классический алгоритм диффузии ошибки. Подходит для большинства изображений.',
+    'Riemersma': 'Riemersma — менее шумный, но более структурированный результат.'
 };
 
 function updateDitherExplanation() {
@@ -51,7 +51,7 @@ async function loadAndApplyConfig() {
     maxKBInput.value = defaultConfig.maxKb;
     frameDelayInput.value = defaultConfig.frameDelay;
     colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither;
+    ditherType = defaultConfig.dither || 'FloydSteinberg';
     ditherSelect.value = ditherType;
     updateDitherExplanation();
 }
@@ -102,7 +102,7 @@ resetSettingsBtn.addEventListener('click', () => {
     maxKBInput.value = defaultConfig.maxKb;
     frameDelayInput.value = defaultConfig.frameDelay;
     colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither;
+    ditherType = defaultConfig.dither || 'FloydSteinberg';
     ditherSelect.value = ditherType;
     updateDitherExplanation();
 });
@@ -126,6 +126,8 @@ chooseDirectoryBtn.addEventListener('click', async () => {
   if (result && result.success) {
     selectedDirectory = result.path;
     directoryDisplay.textContent = selectedDirectory;
+    directoryDisplay.style.display = 'none';
+    chooseDirectoryBtn.textContent = selectedDirectory;
     
     try {
       // Получаем список PNG файлов
@@ -141,7 +143,7 @@ chooseDirectoryBtn.addEventListener('click', async () => {
       showStatus('Ошибка при получении списка файлов: ' + error.message, 'error');
     }
   } else {
-    showStatus('Директория не выбрана', 'error');
+    return;
   }
 });
 
@@ -152,7 +154,8 @@ function displayFiles(groups) {
   
   for (const [groupName, files] of Object.entries(groups)) {
     const groupItem = document.createElement('li');
-    groupItem.textContent = `${groupName} (${files.length} файлов)`;
+    const displayName = groupName.replace(/_/g, ' ');
+    groupItem.innerHTML = `<img src="file://${files[0].path}" class="tiny-preview" alt="prev"> ${displayName} <span class="muted">(${files.length})</span>`;
     fileList.appendChild(groupItem);
   }
 }
@@ -161,14 +164,13 @@ function displayFiles(groups) {
 convertButton.addEventListener('click', async () => {
   if (!selectedDirectory) return;
   
-  const maxMB = parseInt(maxKBInput.value);
-  const maxKB = maxMB * 1024;
+  const maxKB = parseInt(maxKBInput.value);
   const frameDelaySeconds = parseFloat(frameDelayInput.value);
   const frameDelay = Math.round(frameDelaySeconds * 1000);
   const colorCount = parseInt(colorCountSelect.value);
   
-  if (isNaN(maxMB) || maxMB < 1) {
-    showStatus('Пожалуйста, введите корректный размер файла (минимум 1 МБ)', 'error');
+  if (isNaN(maxKB) || maxKB < 1) {
+    showStatus('Пожалуйста, введите корректный размер файла (минимум 1 КБ)', 'error');
     return;
   }
   
@@ -248,13 +250,12 @@ function displayResults() {
       <img src="file://${result.path}" alt="${result.name}">
       <div class="result-info">
         <p><strong>${result.name}</strong></p>
-        <p>Размер: ${(result.size / 1024 / 1024).toFixed(2)} МБ</p>
-        <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}px</p>
-        <p>Дизеринг: ${result.ditherType}</p>
+        <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
+        <p>Размеры: ${result.dimensions.width}×${result.dimensions.height}px</p>
+        <p>Дизеринг: ${result.ditherType === 'none' ? 'Без дизеринга' : result.ditherType}</p>
         ${colorInfo}
       </div>
     `;
-    
     resultsGrid.appendChild(card);
   });
   

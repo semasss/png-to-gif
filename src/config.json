@@ -1,6 +1,6 @@
 {
-    "maxKb": 512,
-    "frameDelay": 3,
+    "maxKb": 10,
+    "frameDelay": 0.1,
     "colorCount": 256,
-    "dither": "none"
+    "dither": "FloydSteinberg"
 } 

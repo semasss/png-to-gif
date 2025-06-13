@@ -1,7 +1,7 @@
 :root {
-    --primary-color: #2033F3;
-    --primary-dark: #1020B5;
-    --primary-light: #AAB4FF;
+    --primary-color: #0066ff;
+    --primary-dark: #0052cc;
+    --primary-light: #e6f0ff;
     --background-color: #f5f5f5;
     --surface-color: #ffffff;
     --text-color: #333333;
@@ -9,7 +9,7 @@
     --error-color: #f44336;
     --success-color: #4caf50;
     --border-radius: 12px;
-    --shadow-color: rgba(0, 0, 0, 0.1);
+    --shadow-color: transparent;
     --rainbow-1: #ff0000;
     --rainbow-2: #ff7f00;
     --rainbow-3: #ffff00;
@@ -58,7 +58,7 @@ body {
     background-color: var(--surface-color);
     padding: 30px 40px;
     border-radius: var(--border-radius);
-    box-shadow: 0 8px 32px var(--shadow-color);
+    box-shadow: none;
 }
 
 .page {
@@ -95,16 +95,16 @@ body {
     border-radius: var(--border-radius);
     cursor: pointer;
     font-size: 1em;
-    transition: all 0.3s ease;
+    transition: background 0.2s ease;
     width: 100%;
     margin-bottom: 20px;
-    box-shadow: 0 4px 6px var(--shadow-color);
+    box-shadow: none;
 }
 
 .button:hover {
     background-color: var(--primary-dark);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px var(--shadow-color);
+    transform: none;
+    box-shadow: none;
 }
 
 .button:disabled {
@@ -150,37 +150,19 @@ label {
     height: 20px;
 }
 
-input[type="number"] {
+input[type="number"], select {
     padding: 10px;
-    border: 2px solid var(--primary-light);
+    border: 1px solid var(--text-secondary);
     border-radius: var(--border-radius);
     font-size: 1em;
     background-color: var(--surface-color);
     color: var(--text-color);
-    transition: all 0.3s ease;
 }
 
 input[type="number"]:focus {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px var(--primary-light);
-}
-
-select {
-    padding: 10px;
-    border: 2px solid var(--primary-light);
-    border-radius: var(--border-radius);
-    font-size: 1em;
-    background-color: var(--surface-color);
-    color: var(--text-color);
-    transition: all 0.3s ease;
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232033F3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    background-size: 16px;
-    padding-right: 40px;
 }
 
 select:focus {
@@ -196,12 +178,9 @@ select option {
 
 #directory-display {
     margin: 20px 0;
-    padding: 15px;
+    padding: 10px;
     background-color: var(--primary-light);
     border-radius: var(--border-radius);
-    color: var(--primary-dark);
-    font-size: 0.9em;
-    word-break: break-all;
 }
 
 #files-container {
@@ -281,11 +260,14 @@ select option {
 }
 
 .result-card {
+    display: flex;
+    gap: 16px;
+    align-items: center;
     background-color: var(--surface-color);
     border-radius: var(--border-radius);
-    padding: 15px;
-    box-shadow: 0 4px 6px var(--shadow-color);
-    transition: transform 0.3s ease;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    box-shadow: none;
 }
 
 .result-card:hover {
@@ -293,9 +275,10 @@ select option {
 }
 
 .result-card img {
-    width: 100%;
-    border-radius: calc(var(--border-radius) - 4px);
-    margin-bottom: 10px;
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 6px;
 }
 
 .result-info {
@@ -477,4 +460,26 @@ select option {
     padding: 5px;
     border-radius: 6px;
     background-color: rgba(0,0,0,0.05);
-} 
+}
+
+.tiny-preview {
+    width: 24px;
+    height: 24px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.muted { color: var(--text-secondary); font-size: 0.85em; }
+
+.footer-link {
+    text-align: center;
+    margin-top: 24px;
+}
+.info-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.9em;
+}
+.info-link:hover { text-decoration: underline; } 

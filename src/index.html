@@ -17,20 +17,21 @@
         </div>
         <div class="form-container">
           <form id="conversion-form">
-            <button type="button" id="choose-directory" class="button">Выбрать директорию</button>
-            <div id="directory-display">Директория не выбрана</div>
+            <button type="button" id="choose-directory" class="button">Выбрать папку</button>
+            <small class="hint">В выбранной папке после работы программы появится подпапка <strong>GIF</strong> с результатами</small>
+            <div id="directory-display"></div>
             
             <div class="settings-grid">
               <div class="setting-group">
-                <label for="max-kb">Максимальный размер GIF (МБ):</label>
+                <label for="max-kb">Максимальный размер GIF (КБ)</label>
                 <input type="number" id="max-kb" value="10" min="1">
               </div>
               <div class="setting-group">
-                <label for="frame-delay">Задержка между кадрами (сек):</label>
+                <label for="frame-delay">Задержка между кадрами (сек)</label>
                 <input type="number" id="frame-delay" value="0.1" min="0.1" step="0.1">
               </div>
               <div class="setting-group">
-                <label for="color-count">Количество цветов:</label>
+                <label for="color-count">Количество цветов</label>
                 <select id="color-count">
                   <option value="32">32</option>
                   <option value="64">64</option>
@@ -39,10 +40,10 @@
                 </select>
               </div>
               <div class="setting-group">
-                <label for="dither-select">Дизеринг:</label>
+                <label for="dither-select">Дизеринг</label>
                 <select id="dither-select">
-                  <option value="none">None</option>
-                  <option value="FloydSteinberg">Floyd-Steinberg</option>
+                  <option value="none">Без дизеринга</option>
+                  <option value="FloydSteinberg" selected>Floyd-Steinberg</option>
                   <option value="Riemersma">Riemersma</option>
                 </select>
                 <div id="dither-explanation"></div>
@@ -77,12 +78,12 @@
       <h1>Результаты конвертации</h1>
       <div id="results-grid" class="result-grid"></div>
       <div class="button-group-results">
-        <button id="open-folder-button" class="button">Открыть папку</button>
         <button id="back-button" class="button secondary">← Назад</button>
+        <button id="open-folder-button" class="button">Открыть папку</button>
       </div>
     </div>
 
-    <div class="info-button" id="info-button">i</div>
+    <footer class="footer-link"><a href="#" id="info-link" class="info-link">О программе</a></footer>
   </div>
 
   <!-- Модальное окно с информацией -->
@@ -94,6 +95,7 @@
         Разработано командой ЦЕХ МОЗГ:<br>
         Сёмой и Егором
       </p>
+      <div class="help-text">PNG-файлы должны иметь имена вида <code>myanimation1.png</code>, <code>myanimation2.png</code> … без пропусков номеров.</div>
     </div>
   </div>
 
