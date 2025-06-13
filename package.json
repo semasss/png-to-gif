@@ -7,7 +7,8 @@
     "start": "electron src/",
     "build": "electron-builder",
     "build-win": "electron-builder --win",
-    "build-mac": "electron-builder --mac --arm64"
+    "build-mac": "electron-builder --mac --arm64",
+    "postinstall": "node scripts/setup-imagemagick.js"
   },
   "author": "",
   "license": "MIT",
@@ -27,19 +28,42 @@
     "appId": "com.png-to-gif-converter",
     "productName": "PNG to GIF Converter",
     "files": [
-      "build/**/*",
+      "src/**/*",
       "node_modules/**/*",
-      "src/**/*"
+      "!node_modules/**/prebuilds/linux*",
+      "!node_modules/**/prebuilds/win32*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/imagemagick",
+        "to": "imagemagick",
+        "filter": ["**/*"]
+      }
     ],
     "directories": {
       "buildResources": "src/assets"
     },
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dmg"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "This app requires Apple Events permission to function properly.",
+        "NSMicrophoneUsageDescription": "This app does not use the microphone.",
+        "NSCameraUsageDescription": "This app does not use the camera."
+      }
     },
     "win": {
       "target": "portable"
-    }
+    },
+    "afterPack": "./scripts/afterPack.js"
   }
 }
