@@ -53,6 +53,33 @@ ipcMain.handle('choose-directory', async () => {
   return null;
 });
 
+// Group PNG files by their prefix
+function groupPngFiles(files) {
+  const groups = {};
+  
+  files.forEach(file => {
+    const match = file.name.match(/^(.+)_\d+\.png$/);
+    if (match) {
+      const prefix = match[1];
+      if (!groups[prefix]) {
+        groups[prefix] = [];
+      }
+      groups[prefix].push(file);
+    }
+  });
+  
+  // Sort files within each group by their number
+  Object.keys(groups).forEach(prefix => {
+    groups[prefix].sort((a, b) => {
+      const numA = parseInt(a.name.match(/_(\d+)\.png$/)[1]);
+      const numB = parseInt(b.name.match(/_(\d+)\.png$/)[1]);
+      return numA - numB;
+    });
+  });
+  
+  return groups;
+}
+
 // Get PNG files from directory
 ipcMain.handle('get-png-files', async (event, directoryPath) => {
   try {
@@ -64,24 +91,44 @@ ipcMain.handle('get-png-files', async (event, directoryPath) => {
       path: path.join(directoryPath, file)
     }));
     
-    return pngFiles;
+    // Group the files
+    const groupedFiles = groupPngFiles(pngFiles);
+    
+    return {
+      allFiles: pngFiles,
+      groupedFiles: groupedFiles
+    };
   } catch (error) {
     console.error('Error reading directory:', error);
-    return [];
+    return {
+      allFiles: [],
+      groupedFiles: {}
+    };
   }
 });
 
-// Convert PNG to GIF
-ipcMain.handle('convert-to-gif', async (event, { pngFilePath, outputDir, maxKB }) => {
+// Convert multiple PNGs to GIF
+ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB, frameDelay }) => {
   try {
-    const fileName = path.basename(pngFilePath, '.png');
-    const outputPath = path.join(outputDir, `${fileName}.gif`);
+    if (!pngFilePaths || pngFilePaths.length === 0) {
+      throw new Error('No PNG files provided');
+    }
+
+    // Use the first file's name (without number) as the output name
+    const firstFileName = path.basename(pngFilePaths[0], '.png');
+    const outputName = firstFileName.replace(/_\d+$/, '');
+    const outputPath = path.join(outputDir, `${outputName}.gif`);
     
-    // Read the PNG file
-    const image = await Image.load(pngFilePath);
+    // Read all PNG files
+    const images = await Promise.all(
+      pngFilePaths.map(filePath => Image.load(filePath))
+    );
+    
+    // Get dimensions from first image
+    const { width, height } = images[0];
     
     // Create a gif encoder
-    const encoder = new GifEncoder(image.width, image.height);
+    const encoder = new GifEncoder(width, height);
     const writeStream = fs.createWriteStream(outputPath);
     
     // Pipe encoder to file
@@ -90,12 +137,14 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePath, outputDir, maxKB }
     // Configure encoder
     encoder.start();
     encoder.setRepeat(0);  // 0 = repeat forever
-    encoder.setDelay(200); // 200ms delay
+    encoder.setDelay(frameDelay || 200); // Use provided delay or default to 200ms
     encoder.setQuality(10); // Quality setting (10 is best)
     
-    // Add frame to GIF - convert RGBA data to format GifEncoder understands
-    const pixelData = image.getRGBAData();
-    encoder.addFrame(pixelData);
+    // Add all frames to GIF
+    for (const image of images) {
+      const pixelData = image.getRGBAData();
+      encoder.addFrame(pixelData);
+    }
     
     // Finish encoding
     encoder.finish();
@@ -111,15 +160,12 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePath, outputDir, maxKB }
     const fileSizeInKB = stats.size / 1024;
     
     if (fileSizeInKB > maxKB) {
-      // If file is too large, we might need to resize the image
+      // If file is too large, we might need to resize the images
       const scaleFactor = Math.sqrt(maxKB / fileSizeInKB);
-      const newWidth = Math.floor(image.width * scaleFactor);
-      const newHeight = Math.floor(image.height * scaleFactor);
+      const newWidth = Math.floor(width * scaleFactor);
+      const newHeight = Math.floor(height * scaleFactor);
       
-      // Resize the image
-      const resizedImage = image.resize({width: newWidth, height: newHeight});
-      
-      // Create a new gif with the resized image
+      // Create a new gif with the resized images
       const newEncoder = new GifEncoder(newWidth, newHeight);
       const newWriteStream = fs.createWriteStream(outputPath);
       
@@ -128,12 +174,15 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePath, outputDir, maxKB }
       
       // Configure encoder
       newEncoder.start();
-      newEncoder.setRepeat(0);  // 0 = repeat forever
-      newEncoder.setDelay(200); // 200ms delay
-      newEncoder.setQuality(10); // Quality setting (10 is best)
+      newEncoder.setRepeat(0);
+      newEncoder.setDelay(frameDelay || 200);
+      newEncoder.setQuality(10);
       
-      // Add frame to GIF
-      newEncoder.addFrame(resizedImage.getRGBAData());
+      // Add all resized frames to GIF
+      for (const image of images) {
+        const resizedImage = image.resize({width: newWidth, height: newHeight});
+        newEncoder.addFrame(resizedImage.getRGBAData());
+      }
       
       // Finish encoding
       newEncoder.finish();
@@ -154,7 +203,7 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePath, outputDir, maxKB }
       originalSize: finalFileSizeInKB
     };
   } catch (error) {
-    console.error('Error converting file:', error);
+    console.error('Error converting files:', error);
     return {
       success: false,
       error: error.message

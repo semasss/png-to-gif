@@ -1,132 +1,126 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const chooseDirectoryBtn = document.getElementById('choose-directory');
-  const directoryDisplay = document.getElementById('directory-display');
-  const convertBtn = document.getElementById('convert-button');
-  const maxKbInput = document.getElementById('max-kb');
-  const fileListDiv = document.getElementById('file-list');
-  const filesContainer = document.getElementById('files-container');
-  const statusDiv = document.getElementById('status');
-  const progressContainer = document.getElementById('progress-container');
-  const progressBar = document.getElementById('progress');
-  const progressText = document.getElementById('progress-text');
-  
-  let selectedDirectory = null;
-  let pngFiles = [];
-  
-  // Choose directory button click handler
-  chooseDirectoryBtn.addEventListener('click', async () => {
-    const directory = await window.electronAPI.chooseDirectory();
-    if (directory) {
-      selectedDirectory = directory;
-      directoryDisplay.value = directory;
-      
-      // Get PNG files from the selected directory
-      pngFiles = await window.electronAPI.getPngFiles(directory);
-      
-      // Display the PNG files
-      displayPngFiles(pngFiles);
-      
-      // Enable/disable convert button based on if we found PNG files
-      convertBtn.disabled = pngFiles.length === 0;
-    }
-  });
-  
-  // Display PNG files function
-  function displayPngFiles(files) {
-    filesContainer.innerHTML = '';
-    
-    if (files.length === 0) {
-      filesContainer.innerHTML = '<p>No PNG files found in the selected directory.</p>';
-      fileListDiv.style.display = 'block';
-      return;
-    }
-    
-    files.forEach(file => {
-      const fileItem = document.createElement('div');
-      fileItem.className = 'file-item';
-      fileItem.textContent = file.name;
-      filesContainer.appendChild(fileItem);
-    });
-    
-    fileListDiv.style.display = 'block';
-  }
-  
-  // Convert button click handler
-  convertBtn.addEventListener('click', async () => {
-    if (!selectedDirectory || pngFiles.length === 0) return;
-    
-    const maxKB = parseInt(maxKbInput.value, 10);
-    if (isNaN(maxKB) || maxKB <= 0) {
-      setStatus('Please enter a valid maximum file size.', 'error');
-      return;
-    }
-    
-    // Disable inputs during conversion
-    chooseDirectoryBtn.disabled = true;
-    convertBtn.disabled = true;
-    maxKbInput.disabled = true;
-    
-    // Setup progress tracking
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressText.textContent = `0/${pngFiles.length} files converted`;
-    
-    // Clear previous status
-    statusDiv.style.display = 'none';
-    
-    let successful = 0;
-    let failed = 0;
-    let totalSize = 0;
-    
-    // Process each PNG file
-    for (let i = 0; i < pngFiles.length; i++) {
-      const file = pngFiles[i];
-      
-      // Update progress
-      progressBar.style.width = `${(i / pngFiles.length) * 100}%`;
-      progressText.textContent = `${i}/${pngFiles.length} files converted`;
-      
-      try {
-        // Convert the file
-        const result = await window.electronAPI.convertToGif({
-          pngFilePath: file.path,
-          outputDir: selectedDirectory,
-          maxKB: maxKB
-        });
-        
-        if (result.success) {
-          successful++;
-          totalSize += result.originalSize;
-        } else {
-          failed++;
-        }
-      } catch (error) {
-        console.error(`Error converting ${file.name}:`, error);
-        failed++;
-      }
-    }
-    
-    // Update final progress
-    progressBar.style.width = '100%';
-    progressText.textContent = `${pngFiles.length}/${pngFiles.length} files converted`;
-    
-    // Show final status
-    if (successful > 0) {
-      setStatus(`Conversion complete! ${successful} files converted successfully, ${failed} failed. Average file size: ${(totalSize / successful).toFixed(2)} KB`, 'success');
-    } else {
-      setStatus('Conversion failed. No files were converted successfully.', 'error');
-    }
-    
-    // Re-enable inputs
-    chooseDirectoryBtn.disabled = false;
-    convertBtn.disabled = false;
-    maxKbInput.disabled = false;
-  });
-  
-  // Set status function
-  function setStatus(message, type) {
-    statusDiv.textContent = message;
-    statusDiv.className = 'status ' + type;
-    statusDiv.style.display = 'block';
+// const { ipcRenderer } = require('electron');
+
+let selectedDirectory = null;
+let pngFiles = [];
+let groupedFiles = {};
+
+// DOM Elements
+const directoryDisplay = document.getElementById('directory-display');
+const chooseDirectoryBtn = document.getElementById('choose-directory');
+const convertButton = document.getElementById('convert-button');
+const maxKBInput = document.getElementById('max-kb');
+const frameDelayInput = document.getElementById('frame-delay');
+const fileList = document.getElementById('file-list');
+const filesContainer = document.getElementById('files-container');
+const progressContainer = document.getElementById('progress-container');
+const progressBar = document.getElementById('progress');
+const progressText = document.getElementById('progress-text');
+const statusDiv = document.getElementById('status');
+
+// Event Listeners
+chooseDirectoryBtn.addEventListener('click', async () => {
+  selectedDirectory = await window.electronAPI.chooseDirectory();
+  if (selectedDirectory) {
+    directoryDisplay.value = selectedDirectory;
+    await loadPngFiles();
   }
 });
+
+convertButton.addEventListener('click', async () => {
+  if (!selectedDirectory) return;
+  
+  const maxKB = parseInt(maxKBInput.value);
+  const frameDelay = parseInt(frameDelayInput.value);
+  
+  if (isNaN(maxKB) || maxKB < 100) {
+    showStatus('Пожалуйста, введите корректный размер файла (минимум 100 КБ)', 'error');
+    return;
+  }
+  
+  if (isNaN(frameDelay) || frameDelay < 50) {
+    showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 50 мс)', 'error');
+    return;
+  }
+  
+  convertButton.disabled = true;
+  progressContainer.style.display = 'block';
+  progressBar.style.width = '0%';
+  
+  let totalGroups = Object.keys(groupedFiles).length;
+  let completedGroups = 0;
+  
+  for (const [groupName, files] of Object.entries(groupedFiles)) {
+    try {
+      const result = await window.electronAPI.convertToGif({
+        pngFilePaths: files.map(f => f.path),
+        outputDir: selectedDirectory,
+        maxKB,
+        frameDelay
+      });
+      
+      if (result.success) {
+        completedGroups++;
+        updateProgress(completedGroups, totalGroups);
+      } else {
+        showStatus(`Ошибка при конвертации группы ${groupName}: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      showStatus(`Ошибка при конвертации группы ${groupName}: ${error.message}`, 'error');
+    }
+  }
+  
+  if (completedGroups === totalGroups) {
+    showStatus(`Успешно сконвертировано ${completedGroups} групп файлов!`, 'success');
+  }
+  
+  convertButton.disabled = false;
+});
+
+async function loadPngFiles() {
+  try {
+    const result = await window.electronAPI.getPngFiles(selectedDirectory);
+    pngFiles = result.allFiles;
+    groupedFiles = result.groupedFiles;
+    
+    if (pngFiles.length === 0) {
+      showStatus('PNG файлы не найдены в выбранной директории', 'error');
+      fileList.style.display = 'none';
+      convertButton.disabled = true;
+      return;
+    }
+    
+    displayFiles();
+    convertButton.disabled = false;
+  } catch (error) {
+    showStatus(`Ошибка при загрузке файлов: ${error.message}`, 'error');
+  }
+}
+
+function displayFiles() {
+  filesContainer.innerHTML = '';
+  fileList.style.display = 'block';
+  
+  for (const [groupName, files] of Object.entries(groupedFiles)) {
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'file-group';
+    groupDiv.innerHTML = `
+      <h4>Группа: ${groupName}</h4>
+      <div class="file-items">
+        ${files.map(file => `<div class="file-item">${file.name}</div>`).join('')}
+      </div>
+    `;
+    filesContainer.appendChild(groupDiv);
+  }
+}
+
+function updateProgress(current, total) {
+  const percentage = (current / total) * 100;
+  progressBar.style.width = `${percentage}%`;
+  progressText.textContent = `${current}/${total} групп сконвертировано`;
+}
+
+function showStatus(message, type) {
+  statusDiv.textContent = message;
+  statusDiv.className = `status ${type}`;
+  statusDiv.style.display = 'block';
+}

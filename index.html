@@ -83,6 +83,22 @@
       border-bottom: none;
     }
     
+    .file-group {
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+    }
+    
+    .file-group h4 {
+      margin: 0 0 10px 0;
+      color: #333;
+    }
+    
+    .file-items {
+      margin-left: 20px;
+    }
+    
     .status {
       margin-top: 10px;
       padding: 10px;
@@ -137,11 +153,17 @@
       <input type="number" id="max-kb" value="5120" min="100">
       <small style="display: block; margin-top: 5px; color: #666;">5120 КБ = 5 МБ</small>
     </div>
+
+    <div class="input-group">
+      <label for="frame-delay">Задержка между кадрами (мс):</label>
+      <input type="number" id="frame-delay" value="200" min="50" step="50">
+      <small style="display: block; margin-top: 5px; color: #666;">Рекомендуемое значение: 200-500 мс</small>
+    </div>
     
     <button id="convert-button" disabled>Конвертировать все PNG файлы</button>
     
     <div id="file-list" class="file-list" style="display: none;">
-      <h3>Найденные PNG файлы:</h3>
+      <h3>Найденные группы PNG файлов:</h3>
       <div id="files-container"></div>
     </div>
     
