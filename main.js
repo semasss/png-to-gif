@@ -42,248 +42,176 @@ app.on('activate', () => {
   }
 });
 
-// Choose directory dialog
+// Получение информации о GIF файле
+async function getGifInfo(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    const image = await sharp(filePath);
+    const metadata = await image.metadata();
+    
+    return {
+      success: true,
+      size: stats.size,
+      dimensions: {
+        width: metadata.width,
+        height: metadata.height
+      }
+    };
+  } catch (error) {
+    console.error('Error getting GIF info:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Обработчики IPC
 ipcMain.handle('choose-directory', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog({
     properties: ['openDirectory']
   });
   
   if (!result.canceled) {
-    return result.filePaths[0];
+    return { success: true, path: result.filePaths[0] };
   }
-  return null;
+  return { success: false, error: 'Директория не выбрана' };
 });
 
-// Group PNG files by their prefix
-function groupPngFiles(files) {
-  const groups = {};
-  
-  files.forEach(file => {
-    const match = file.name.match(/^(.+)_\d+\.png$/);
-    if (match) {
-      const prefix = match[1];
-      if (!groups[prefix]) {
-        groups[prefix] = [];
-      }
-      groups[prefix].push(file);
+ipcMain.handle('get-gif-info', async (event, { filePath, ditherType }) => {
+  const info = await getGifInfo(filePath);
+  info.ditherType = ditherType;
+  return info;
+});
+
+// Получение списка PNG файлов
+async function getPngFiles(directory) {
+  try {
+    const files = fs.readdirSync(directory);
+    const pngFiles = files.filter(file => file.toLowerCase().endsWith('.png'));
+    
+    if (pngFiles.length === 0) {
+      return { success: false, error: 'PNG файлы не найдены в выбранной директории' };
     }
-  });
-  
-  // Sort files within each group by their number
-  Object.keys(groups).forEach(prefix => {
-    groups[prefix].sort((a, b) => {
-      const numA = parseInt(a.name.match(/_(\d+)\.png$/)[1]);
-      const numB = parseInt(b.name.match(/_(\d+)\.png$/)[1]);
-      return numA - numB;
+
+    // Группировка файлов по имени (без номера)
+    const groups = {};
+    pngFiles.forEach(file => {
+      const baseName = file.replace(/\d+\.png$/, '');
+      if (!groups[baseName]) {
+        groups[baseName] = [];
+      }
+      groups[baseName].push({
+        name: file,
+        path: path.join(directory, file)
+      });
     });
-  });
-  
-  return groups;
+
+    // Сортировка файлов в каждой группе
+    for (const group in groups) {
+      groups[group].sort((a, b) => {
+        const numA = parseInt(a.name.match(/\d+/)?.[0] || '0');
+        const numB = parseInt(b.name.match(/\d+/)?.[0] || '0');
+        return numA - numB;
+      });
+    }
+
+    return { success: true, groups };
+  } catch (error) {
+    console.error('Error getting PNG files:', error);
+    return { success: false, error: error.message };
+  }
 }
 
-// Get PNG files from directory
-ipcMain.handle('get-png-files', async (event, directoryPath) => {
-  try {
-    const files = fs.readdirSync(directoryPath);
-    const pngFiles = files.filter(file => 
-      file.toLowerCase().endsWith('.png')
-    ).map(file => ({
-      name: file,
-      path: path.join(directoryPath, file)
-    }));
-    
-    // Group the files
-    const groupedFiles = groupPngFiles(pngFiles);
-    
-    return {
-      allFiles: pngFiles,
-      groupedFiles: groupedFiles
-    };
-  } catch (error) {
-    console.error('Error reading directory:', error);
-    return {
-      allFiles: [],
-      groupedFiles: {}
-    };
-  }
+// Обработчики IPC
+ipcMain.handle('get-png-files', async (event, directory) => {
+  return await getPngFiles(directory);
 });
 
 // Convert multiple PNGs to GIF
-async function convertToGif(pngFilePaths, outputDir, maxKB, frameDelay, colorCount) {
+async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType) {
   try {
-    // Читаем первый файл для получения размеров
     const firstImage = await sharp(pngFilePaths[0]);
     const metadata = await firstImage.metadata();
     const { width, height } = metadata;
 
-    // Создаем энкодер с настройкой количества цветов
-    const encoder = new GIFEncoder(width, height);
-    encoder.setOptions({
-      repeat: 0,
-      delay: frameDelay,
-      quality: 10,
-      colors: colorCount || 256,
-      dither: true
-    });
-    encoder.start();
+    // Определяем тип дизеринга
+    const dither = ditherType !== 'none';
 
-    // Обрабатываем каждый PNG файл
+    const encoder = new GIFEncoder(width, height);
+    encoder.start();
+    encoder.setRepeat(0);
+    encoder.setDelay(frameDelay);
+    encoder.setQuality(10);
+
     for (const pngPath of pngFilePaths) {
-      const image = await sharp(pngPath);
-      const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
+      let image_pipeline = sharp(pngPath);
+      if(dither) {
+        image_pipeline = image_pipeline.png({
+          palette: true,
+          colours: colorCount,
+          dither: 1.0,
+        })
+      }
+      const { data } = await image_pipeline.raw().toBuffer({ resolveWithObject: true });
       encoder.addFrame(data);
     }
 
-    // Завершаем создание GIF
     encoder.finish();
     const buffer = encoder.out.getData();
+    let finalBuffer = buffer;
+    let finalWidth = width;
+    let finalHeight = height;
 
-    // Если размер превышает максимальный, уменьшаем размер
     if (buffer.length > maxKB * 1024) {
       const scale = Math.sqrt((maxKB * 1024) / buffer.length);
       const newWidth = Math.round(width * scale);
       const newHeight = Math.round(height * scale);
+      finalWidth = newWidth;
+      finalHeight = newHeight;
 
-      // Создаем новый энкодер с уменьшенными размерами
       const resizedEncoder = new GIFEncoder(newWidth, newHeight);
-      resizedEncoder.setOptions({
-        repeat: 0,
-        delay: frameDelay,
-        quality: 10,
-        colors: colorCount || 256,
-        dither: true
-      });
       resizedEncoder.start();
+      resizedEncoder.setRepeat(0);
+      resizedEncoder.setDelay(frameDelay);
+      resizedEncoder.setQuality(10);
 
-      // Обрабатываем каждый PNG файл с новыми размерами
       for (const pngPath of pngFilePaths) {
-        const image = await sharp(pngPath)
-          .resize(newWidth, newHeight)
+        let image_pipeline = sharp(pngPath).resize(newWidth, newHeight);
+
+        if(dither) {
+          image_pipeline = image_pipeline.png({
+            palette: true,
+            colours: colorCount,
+            dither: 1.0,
+          })
+        }
+
+        const image = await image_pipeline
           .raw()
           .toBuffer({ resolveWithObject: true });
         resizedEncoder.addFrame(image.data);
       }
 
       resizedEncoder.finish();
-      const resizedBuffer = resizedEncoder.out.getData();
-
-      // Сохраняем уменьшенный GIF
-      const outputPath = path.join(outputDir, 'output.gif');
-      fs.writeFileSync(outputPath, resizedBuffer);
-      return { success: true, path: outputPath };
+      finalBuffer = resizedEncoder.out.getData();
     }
 
-    // Сохраняем оригинальный GIF
-    const outputPath = path.join(outputDir, 'output.gif');
-    fs.writeFileSync(outputPath, buffer);
-    return { success: true, path: outputPath };
+    const outputPath = path.join(outputDir, `${groupName}.gif`);
+    fs.writeFileSync(outputPath, finalBuffer);
+    return { 
+      success: true, 
+      path: outputPath,
+      ditherType,
+      size: finalBuffer.length,
+      dimensions: {
+        width: finalWidth,
+        height: finalHeight
+      }
+    };
   } catch (error) {
     console.error('Error converting to GIF:', error);
     return { success: false, error: error.message };
   }
 }
 
-ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB, frameDelay, colorCount }) => {
-  try {
-    if (!pngFilePaths || pngFilePaths.length === 0) {
-      throw new Error('No PNG files provided');
-    }
-
-    // Use the first file's name (without number) as the output name
-    const firstFileName = path.basename(pngFilePaths[0], '.png');
-    const outputName = firstFileName.replace(/_\d+$/, '');
-    const outputPath = path.join(outputDir, `${outputName}.gif`);
-    
-    // Read all PNG files
-    const images = await Promise.all(
-      pngFilePaths.map(filePath => Image.load(filePath))
-    );
-    
-    // Get dimensions from first image
-    const { width, height } = images[0];
-    
-    // Create a gif encoder
-    const encoder = new GIFEncoder(width, height);
-    const writeStream = fs.createWriteStream(outputPath);
-    
-    // Pipe encoder to file
-    encoder.createReadStream().pipe(writeStream);
-    
-    // Configure encoder
-    encoder.start();
-    encoder.setRepeat(0);  // 0 = repeat forever
-    encoder.setDelay(frameDelay || 200); // Use provided delay or default to 200ms
-    encoder.setQuality(10); // Quality setting (10 is best)
-    encoder.setTransparent(null); // No transparency
-    
-    // Add all frames to GIF
-    for (const image of images) {
-      const pixelData = image.getRGBAData();
-      encoder.addFrame(pixelData);
-    }
-    
-    // Finish encoding
-    encoder.finish();
-    
-    // Wait for write to complete
-    await new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
-    });
-    
-    // Check file size and optimize if needed
-    const stats = fs.statSync(outputPath);
-    const fileSizeInKB = stats.size / 1024;
-    
-    if (fileSizeInKB > maxKB) {
-      // If file is too large, we might need to resize the images
-      const scaleFactor = Math.sqrt(maxKB / fileSizeInKB);
-      const newWidth = Math.floor(width * scaleFactor);
-      const newHeight = Math.floor(height * scaleFactor);
-      
-      // Create a new gif with the resized images
-      const newEncoder = new GIFEncoder(newWidth, newHeight);
-      const newWriteStream = fs.createWriteStream(outputPath);
-      
-      // Pipe encoder to file
-      newEncoder.createReadStream().pipe(newWriteStream);
-      
-      // Configure encoder
-      newEncoder.start();
-      newEncoder.setRepeat(0);
-      newEncoder.setDelay(frameDelay || 200);
-      newEncoder.setQuality(10);
-      newEncoder.setTransparent(null);
-      
-      // Add all resized frames to GIF
-      for (const image of images) {
-        const resizedImage = image.resize({width: newWidth, height: newHeight});
-        newEncoder.addFrame(resizedImage.getRGBAData());
-      }
-      
-      // Finish encoding
-      newEncoder.finish();
-      
-      // Wait for write to complete
-      await new Promise((resolve, reject) => {
-        newWriteStream.on('finish', resolve);
-        newWriteStream.on('error', reject);
-      });
-    }
-    
-    const finalStats = fs.statSync(outputPath);
-    const finalFileSizeInKB = finalStats.size / 1024;
-    
-    return {
-      success: true,
-      outputPath,
-      originalSize: finalFileSizeInKB
-    };
-  } catch (error) {
-    console.error('Error converting files:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
+ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType }) => {
+  return await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
 });
