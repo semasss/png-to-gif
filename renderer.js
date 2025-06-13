@@ -10,6 +10,7 @@ const chooseDirectoryBtn = document.getElementById('choose-directory');
 const convertButton = document.getElementById('convert-button');
 const maxKBInput = document.getElementById('max-kb');
 const frameDelayInput = document.getElementById('frame-delay');
+const colorCountSelect = document.getElementById('color-count');
 const fileList = document.getElementById('file-list');
 const filesContainer = document.getElementById('files-container');
 const progressContainer = document.getElementById('progress-container');
@@ -33,6 +34,7 @@ convertButton.addEventListener('click', async () => {
   const maxKB = maxMB * 1024; // Конвертируем МБ в КБ
   const frameDelaySeconds = parseFloat(frameDelayInput.value);
   const frameDelay = Math.round(frameDelaySeconds * 1000); // Конвертируем секунды в миллисекунды
+  const colorCount = parseInt(colorCountSelect.value);
   
   if (isNaN(maxMB) || maxMB < 1) {
     showStatus('Пожалуйста, введите корректный размер файла (минимум 1 МБ)', 'error');
@@ -57,7 +59,8 @@ convertButton.addEventListener('click', async () => {
         pngFilePaths: files.map(f => f.path),
         outputDir: selectedDirectory,
         maxKB,
-        frameDelay
+        frameDelay,
+        colorCount
       });
       
       if (result.success) {

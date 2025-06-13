@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 const { Image } = require('image-js');
-const GifEncoder = require('gifencoder');
+const GIFEncoder = require('gif-encoder-2');
+const sharp = require('sharp');
 
 let mainWindow;
 
@@ -108,6 +109,80 @@ ipcMain.handle('get-png-files', async (event, directoryPath) => {
 });
 
 // Convert multiple PNGs to GIF
+async function convertToGif(pngFilePaths, outputDir, maxKB, frameDelay, colorCount) {
+  try {
+    // Читаем первый файл для получения размеров
+    const firstImage = await sharp(pngFilePaths[0]);
+    const metadata = await firstImage.metadata();
+    const { width, height } = metadata;
+
+    // Создаем энкодер с настройкой количества цветов
+    const encoder = new GIFEncoder(width, height);
+    encoder.setOptions({
+      repeat: 0,
+      delay: frameDelay,
+      quality: 10,
+      colors: colorCount || 256,
+      dither: true
+    });
+    encoder.start();
+
+    // Обрабатываем каждый PNG файл
+    for (const pngPath of pngFilePaths) {
+      const image = await sharp(pngPath);
+      const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
+      encoder.addFrame(data);
+    }
+
+    // Завершаем создание GIF
+    encoder.finish();
+    const buffer = encoder.out.getData();
+
+    // Если размер превышает максимальный, уменьшаем размер
+    if (buffer.length > maxKB * 1024) {
+      const scale = Math.sqrt((maxKB * 1024) / buffer.length);
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+
+      // Создаем новый энкодер с уменьшенными размерами
+      const resizedEncoder = new GIFEncoder(newWidth, newHeight);
+      resizedEncoder.setOptions({
+        repeat: 0,
+        delay: frameDelay,
+        quality: 10,
+        colors: colorCount || 256,
+        dither: true
+      });
+      resizedEncoder.start();
+
+      // Обрабатываем каждый PNG файл с новыми размерами
+      for (const pngPath of pngFilePaths) {
+        const image = await sharp(pngPath)
+          .resize(newWidth, newHeight)
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        resizedEncoder.addFrame(image.data);
+      }
+
+      resizedEncoder.finish();
+      const resizedBuffer = resizedEncoder.out.getData();
+
+      // Сохраняем уменьшенный GIF
+      const outputPath = path.join(outputDir, 'output.gif');
+      fs.writeFileSync(outputPath, resizedBuffer);
+      return { success: true, path: outputPath };
+    }
+
+    // Сохраняем оригинальный GIF
+    const outputPath = path.join(outputDir, 'output.gif');
+    fs.writeFileSync(outputPath, buffer);
+    return { success: true, path: outputPath };
+  } catch (error) {
+    console.error('Error converting to GIF:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB, frameDelay, colorCount }) => {
   try {
     if (!pngFilePaths || pngFilePaths.length === 0) {
@@ -128,7 +203,7 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB,
     const { width, height } = images[0];
     
     // Create a gif encoder
-    const encoder = new GifEncoder(width, height);
+    const encoder = new GIFEncoder(width, height);
     const writeStream = fs.createWriteStream(outputPath);
     
     // Pipe encoder to file
@@ -167,7 +242,7 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB,
       const newHeight = Math.floor(height * scaleFactor);
       
       // Create a new gif with the resized images
-      const newEncoder = new GifEncoder(newWidth, newHeight);
+      const newEncoder = new GIFEncoder(newWidth, newHeight);
       const newWriteStream = fs.createWriteStream(outputPath);
       
       // Pipe encoder to file
