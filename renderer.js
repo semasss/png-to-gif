@@ -29,16 +29,18 @@ chooseDirectoryBtn.addEventListener('click', async () => {
 convertButton.addEventListener('click', async () => {
   if (!selectedDirectory) return;
   
-  const maxKB = parseInt(maxKBInput.value);
-  const frameDelay = parseInt(frameDelayInput.value);
+  const maxMB = parseInt(maxKBInput.value);
+  const maxKB = maxMB * 1024; // Конвертируем МБ в КБ
+  const frameDelaySeconds = parseFloat(frameDelayInput.value);
+  const frameDelay = Math.round(frameDelaySeconds * 1000); // Конвертируем секунды в миллисекунды
   
-  if (isNaN(maxKB) || maxKB < 100) {
-    showStatus('Пожалуйста, введите корректный размер файла (минимум 100 КБ)', 'error');
+  if (isNaN(maxMB) || maxMB < 1) {
+    showStatus('Пожалуйста, введите корректный размер файла (минимум 1 МБ)', 'error');
     return;
   }
   
-  if (isNaN(frameDelay) || frameDelay < 50) {
-    showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 50 мс)', 'error');
+  if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.1) {
+    showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.1 сек)', 'error');
     return;
   }
   

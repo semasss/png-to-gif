@@ -108,7 +108,7 @@ ipcMain.handle('get-png-files', async (event, directoryPath) => {
 });
 
 // Convert multiple PNGs to GIF
-ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB, frameDelay }) => {
+ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB, frameDelay, colorCount }) => {
   try {
     if (!pngFilePaths || pngFilePaths.length === 0) {
       throw new Error('No PNG files provided');
@@ -139,6 +139,7 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB,
     encoder.setRepeat(0);  // 0 = repeat forever
     encoder.setDelay(frameDelay || 200); // Use provided delay or default to 200ms
     encoder.setQuality(10); // Quality setting (10 is best)
+    encoder.setTransparent(null); // No transparency
     
     // Add all frames to GIF
     for (const image of images) {
@@ -177,6 +178,7 @@ ipcMain.handle('convert-to-gif', async (event, { pngFilePaths, outputDir, maxKB,
       newEncoder.setRepeat(0);
       newEncoder.setDelay(frameDelay || 200);
       newEncoder.setQuality(10);
+      newEncoder.setTransparent(null);
       
       // Add all resized frames to GIF
       for (const image of images) {
