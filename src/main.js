@@ -4,6 +4,7 @@ const fs = require('fs');
 const isDev = require('electron-is-dev');
 const { spawn, execSync } = require('child_process');
 const { shell } = require('electron');
+const { Image } = require('image-js');
 
 let mainWindow;
 let gifskiPath; // Глобальная переменная для хранения пути
@@ -276,14 +277,21 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
     log(`Начало конвертации для группы: ${groupName}`);
     log(`Параметры: fps=${fps} (из ${frameDelay}s задержки), quality=${quality}`);
 
-    const args = [
-        '--fps', fps.toString(),
-        '--quality', quality.toString(),
-        '-o', outputPath,
-        ...pngFilePaths // передаем отсортированный список путей
-    ];
-
     try {
+        // Получаем размеры из первого изображения, чтобы передать их gifski
+        const firstImage = await Image.load(pngFilePaths[0]);
+        const { width, height } = firstImage;
+        log(`Исходное разрешение: ${width}x${height}`);
+
+        const args = [
+            '--fps', fps.toString(),
+            '--quality', quality.toString(),
+            '--width', width.toString(),
+            '--height', height.toString(),
+            '-o', outputPath,
+            ...pngFilePaths // передаем отсортированный список путей
+        ];
+
         const commandString = `gifski ${args.join(' ')}`;
         log(`Выполнение команды: ${commandString}`);
 
