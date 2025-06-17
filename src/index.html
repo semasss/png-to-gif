@@ -10,94 +10,70 @@
   <div class="container">
     <!-- Главная страница -->
     <div id="main-page" class="page active">
-      <div class="main-content">
-        <div class="app-title">
-          <img src="assets/icon.png" alt="App Icon" class="app-icon">
-          <h1>ЖИФ</h1>
-        </div>
-        <div class="form-container">
-          <form id="conversion-form">
-            <button type="button" id="choose-directory" class="button">Выбрать папку</button>
-            <small class="hint">В выбранной папке после работы программы появится подпапка <strong>GIF</strong> с результатами</small>
-            <div id="directory-display"></div>
-            
-            <div class="settings-grid">
-              <div class="setting-group">
-                <label for="max-kb">Максимальный размер GIF (КБ)</label>
-                <input type="number" id="max-kb" value="10" min="1">
-              </div>
-              <div class="setting-group">
-                <label for="frame-delay">Задержка между кадрами (сек)</label>
-                <input type="number" id="frame-delay" value="0.1" min="0.1" step="0.1">
-              </div>
-              <div class="setting-group">
-                <label for="color-count">Количество цветов</label>
-                <select id="color-count">
-                  <option value="32">32</option>
-                  <option value="64">64</option>
-                  <option value="128">128</option>
-                  <option value="256" selected>256</option>
-                </select>
-              </div>
-              <div class="setting-group">
-                <label for="dither-select">Дизеринг</label>
-                <select id="dither-select">
-                  <option value="none">Без дизеринга</option>
-                  <option value="FloydSteinberg" selected>Floyd-Steinberg</option>
-                  <option value="Riemersma">Riemersma</option>
-                </select>
-                <div id="dither-explanation"></div>
-              </div>
+      <div class="logo-container">
+        <pre id="ascii-logo">Загрузка лого...</pre>
+      </div>
+      
+      <button id="choose-directory" class="button">Выбрать папку</button>
+      <p id="directory-display"></p>
+      <p class="explanation">В выбранной папке после работы программы появится подпапка GIF с результатами <span class="tooltip" id="info-link">?</span></p>
+
+      <div class="settings-container">
+        <h2>Настройки</h2>
+        <div class="settings-grid">
+          <div class="setting">
+            <label for="frame-delay">Задержка между кадрами (сек)</label>
+            <input type="number" id="frame-delay" value="3" min="0.01" step="0.1">
+          </div>
+          <div class="setting">
+            <label for="quality-slider">Качество (1-100)</label>
+            <div class="slider-container">
+              <input type="range" id="quality-slider" min="1" max="100" value="90">
+              <span id="quality-value">90%</span>
             </div>
-            
-            <div class="button-group">
-              <button type="button" id="reset-settings" class="button secondary">Сбросить настройки</button>
-              <button type="button" id="convert-button" class="button" disabled>Конвертировать в GIF</button>
-            </div>
-            
-            <div id="files-container" style="display: none;">
-              <h3>Найденные PNG файлы:</h3>
-              <ul id="file-list"></ul>
-            </div>
-            
-            <div id="progress-container">
-              <div class="progress-bar">
-                <div id="progress"></div>
-              </div>
-              <div id="progress-text">0%</div>
-            </div>
-            
-            <div id="status"></div>
-          </form>
+            <p class="explanation">Высокое качество увеличивает размер файла. 100 — без потерь.</p>
+          </div>
         </div>
       </div>
-    </div>
+      
+      <div id="files-container">
+        <h3>Найденные группы файлов:</h3>
+        <ul id="file-list"></ul>
+      </div>
 
-    <!-- Страница результатов -->
+      <div class="buttons">
+        <button id="convert-button" class="button primary" disabled>Конвертировать в GIF</button>
+        <button id="reset-settings" class="button secondary">Сбросить настройки</button>
+      </div>
+      
+      <div id="progress-container">
+        <p id="progress-text"></p>
+        <div class="progress-bar-container">
+          <div id="progress"></div>
+        </div>
+      </div>
+      <div id="status" class="hidden"></div>
+    </div>
+    
     <div id="results-page" class="page">
-      <h1>Результаты конвертации</h1>
-      <div id="results-grid" class="result-grid"></div>
-      <div class="button-group-results">
-        <button id="back-button" class="button secondary">← Назад</button>
-        <button id="open-folder-button" class="button">Открыть папку</button>
+      <button id="back-button" class="button">&larr; Назад к настройкам</button>
+      <h2>Результаты конвертации</h2>
+      <div id="results-grid"></div>
+      <button id="open-folder-button" class="button primary">Открыть папку с результатами</button>
+    </div>
+
+    <div id="info-modal" class="modal">
+      <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <h3>Как это работает?</h3>
+        <p>Программа ищет в выбранной папке PNG-файлы, которые выглядят как секвенции изображений (например, `banner_1.png`, `banner_2.png` и т.д.).</p>
+        <p>Затем она группирует эти секвенции и превращает каждую группу в отдельный анимированный GIF-файл.</p>
+        <p>Для наилучшего качества используется утилита <a href="https://gif.ski/" target="_blank">gifski</a>, которая создает плавные GIF с 256 цветами на кадр.</p>
       </div>
     </div>
-
-    <footer class="footer-link"><a href="#" id="info-link" class="info-link">О программе</a></footer>
   </div>
 
-  <!-- Модальное окно с информацией -->
-  <div id="info-modal" class="modal">
-    <div class="modal-content">
-      <span class="modal-close">&times;</span>
-      <pre id="ascii-logo" class="ascii-logo"></pre>
-      <p style="text-align: center; margin-top: 20px;">
-        Разработано командой ЦЕХ МОЗГ:<br>
-        Сёмой и Егором
-      </p>
-      <div class="help-text">PNG-файлы должны иметь имена вида <code>myanimation1.png</code>, <code>myanimation2.png</code> … без пропусков номеров.</div>
-    </div>
-  </div>
+  <footer class="footer-link"><a href="#" id="info-link" class="info-link">О программе</a></footer>
 
   <script src="renderer.js"></script>
 </body>

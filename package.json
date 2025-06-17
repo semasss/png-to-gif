@@ -4,7 +4,8 @@
   "description": "PNG в GIF конвертер",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron src/",
+    "start": "electron src/main.js",
+    "dev": "npm start",
     "build": "electron-builder",
     "build-win": "electron-builder --win",
     "build-mac": "electron-builder --mac --arm64",

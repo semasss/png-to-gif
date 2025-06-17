@@ -4,7 +4,6 @@ let selectedDirectory = null;
 let pngFiles = [];
 let groupedFiles = {};
 let conversionResults = [];
-let ditherType = 'FloydSteinberg';
 
 let defaultConfig = {};
 
@@ -13,9 +12,9 @@ const directoryDisplay = document.getElementById('directory-display');
 const chooseDirectoryBtn = document.getElementById('choose-directory');
 const convertButton = document.getElementById('convert-button');
 const resetSettingsBtn = document.getElementById('reset-settings');
-const maxKBInput = document.getElementById('max-kb');
 const frameDelayInput = document.getElementById('frame-delay');
-const colorCountSelect = document.getElementById('color-count');
+const qualitySlider = document.getElementById('quality-slider');
+const qualityValue = document.getElementById('quality-value');
 const fileList = document.getElementById('file-list');
 const filesContainer = document.getElementById('files-container');
 const progressContainer = document.getElementById('progress-container');
@@ -30,38 +29,22 @@ const infoButton = document.getElementById('info-link');
 const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
-const ditherSelect = document.getElementById('dither-select');
-const ditherExplanation = document.getElementById('dither-explanation');
 const openFolderBtn = document.getElementById('open-folder-button');
-
-const ditherExplanations = {
-    'none': 'Без дизеринга. Возможны резкие переходы между цветами.',
-    'FloydSteinberg': 'Floyd–Steinberg — классический алгоритм диффузии ошибки. Подходит для большинства изображений.',
-    'Riemersma': 'Riemersma — менее шумный, но более структурированный результат.'
-};
-
-function updateDitherExplanation() {
-    ditherType = ditherSelect.value;
-    ditherExplanation.textContent = ditherExplanations[ditherType];
-}
 
 // Загрузка и применение конфига
 async function loadAndApplyConfig() {
     defaultConfig = await window.electronAPI.getConfig();
-    maxKBInput.value = defaultConfig.maxKb;
     frameDelayInput.value = defaultConfig.frameDelay;
-    colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither || 'FloydSteinberg';
-    ditherSelect.value = ditherType;
-    updateDitherExplanation();
+    qualitySlider.value = defaultConfig.quality;
+    qualityValue.textContent = `${defaultConfig.quality}%`;
 }
 
-// Проверка наличия ImageMagick при запуске
+// Проверка наличия gifski при запуске
 document.addEventListener('DOMContentLoaded', async () => {
     await loadAndApplyConfig();
-    const isImageMagickAvailable = await window.electronAPI.checkImageMagick();
-    if (!isImageMagickAvailable) {
-        showStatus('Внимание: ImageMagick не найден. Установите его и перезапустите приложение. Инструкции в README.', 'error');
+    const isGifskiAvailable = await window.electronAPI.checkImageMagick(); // API остался тот же
+    if (!isGifskiAvailable) {
+        showStatus('Внимание: gifski не найден. Установите его (brew install gifski) и перезапустите приложение.', 'error');
         convertButton.disabled = true;
     }
 });
@@ -99,12 +82,9 @@ infoModal.addEventListener('click', (e) => {
 
 // Обработчик сброса настроек
 resetSettingsBtn.addEventListener('click', () => {
-    maxKBInput.value = defaultConfig.maxKb;
     frameDelayInput.value = defaultConfig.frameDelay;
-    colorCountSelect.value = defaultConfig.colorCount;
-    ditherType = defaultConfig.dither || 'FloydSteinberg';
-    ditherSelect.value = ditherType;
-    updateDitherExplanation();
+    qualitySlider.value = defaultConfig.quality;
+    qualityValue.textContent = `${defaultConfig.quality}%`;
 });
 
 // Обработчик кнопки "Назад"
@@ -126,8 +106,9 @@ chooseDirectoryBtn.addEventListener('click', async () => {
   if (result && result.success) {
     selectedDirectory = result.path;
     directoryDisplay.textContent = selectedDirectory;
-    directoryDisplay.style.display = 'none';
-    chooseDirectoryBtn.textContent = selectedDirectory;
+    directoryDisplay.style.display = 'block';
+    chooseDirectoryBtn.classList.add('chosen');
+    chooseDirectoryBtn.textContent = 'Изменить папку';
     
     try {
       // Получаем список PNG файлов
@@ -164,18 +145,11 @@ function displayFiles(groups) {
 convertButton.addEventListener('click', async () => {
   if (!selectedDirectory) return;
   
-  const maxKB = parseInt(maxKBInput.value);
   const frameDelaySeconds = parseFloat(frameDelayInput.value);
-  const frameDelay = Math.round(frameDelaySeconds * 1000);
-  const colorCount = parseInt(colorCountSelect.value);
-  
-  if (isNaN(maxKB) || maxKB < 1) {
-    showStatus('Пожалуйста, введите корректный размер файла (минимум 1 КБ)', 'error');
-    return;
-  }
-  
-  if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.1) {
-    showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.1 сек)', 'error');
+  const quality = parseInt(qualitySlider.value);
+
+  if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.01) {
+    showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.01 сек)', 'error');
     return;
   }
   
@@ -194,10 +168,8 @@ convertButton.addEventListener('click', async () => {
         groupName: groupName,
         pngFilePaths: files.map(f => f.path),
         outputDir: selectedDirectory,
-        maxKB,
-        frameDelay,
-        colorCount,
-        ditherType
+        frameDelay: frameDelaySeconds,
+        quality: quality,
       });
       
       if (result.success) {
@@ -209,10 +181,7 @@ convertButton.addEventListener('click', async () => {
           name: groupName,
           size: result.size,
           dimensions: result.dimensions,
-          ditherType: result.ditherType,
-          colorsReduced: result.colorsReduced,
           finalColorCount: result.finalColorCount,
-          initialColorCount: result.initialColorCount
         });
       } else {
         showStatus(`Ошибка при конвертации группы ${groupName}: ${result.error}`, 'error');
@@ -241,18 +210,14 @@ function displayResults() {
     const card = document.createElement('div');
     card.className = 'result-card';
     
-    let colorInfo = `<p>Цветов: ${result.finalColorCount}</p>`;
-    if (result.colorsReduced) {
-        colorInfo = `<p>Цветов: ${result.finalColorCount} (уменьшено с ${result.initialColorCount})</p>`;
-    }
+    let colorInfo = `<p>Цветов: до ${result.finalColorCount}</p>`;
 
     card.innerHTML = `
       <img src="file://${result.path}" alt="${result.name}">
       <div class="result-info">
         <p><strong>${result.name}</strong></p>
         <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
-        <p>Размеры: ${result.dimensions.width}×${result.dimensions.height}px</p>
-        <p>Дизеринг: ${result.ditherType === 'none' ? 'Без дизеринга' : result.ditherType}</p>
+        <p>Размеры: н/д</p> 
         ${colorInfo}
       </div>
     `;
@@ -281,4 +246,6 @@ function showStatus(message, type) {
   }, 5000);
 }
 
-ditherSelect.addEventListener('change', updateDitherExplanation);
+qualitySlider.addEventListener('input', () => {
+    qualityValue.textContent = `${qualitySlider.value}%`;
+});

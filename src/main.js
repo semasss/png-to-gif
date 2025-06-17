@@ -2,77 +2,78 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const { shell } = require('electron');
 
 let mainWindow;
+let gifskiPath; // Глобальная переменная для хранения пути
 
-// Функция для получения пути к magick
-function getMagickPath() {
-    let magickPath;
+// Функция для поиска gifski
+function findGifskiPath() {
+    // 1. В режиме разработки, приоритет у глобальной версии для скорости
+    if (isDev) {
+        try {
+            const systemPath = execSync('which gifski', { encoding: 'utf-8' }).trim();
+            if (systemPath && fs.existsSync(systemPath)) {
+                console.log(`[GIFSKI_PATH] Режим разработки: используется глобальный gifski из PATH: ${systemPath}`);
+                return systemPath;
+            }
+        } catch (error) {
+            console.log('[GIFSKI_PATH] Глобальный gifski не найден, ищем локальную версию как fallback...');
+        }
+    }
+
+    // 2. Локальная версия (vendor для dev, resources для prod)
+    let localPath;
+    if (isDev) {
+        // Fallback для разработки
+        localPath = path.join(__dirname, '..', 'vendor', 'gifski', 'gifski');
+    } else {
+        // Основной путь для готового приложения
+        localPath = path.join(process.resourcesPath, 'gifski');
+    }
+
+    if (fs.existsSync(localPath)) {
+        console.log(`[GIFSKI_PATH] Используется локальный gifski: ${localPath}`);
+        try {
+            fs.accessSync(localPath, fs.constants.X_OK);
+        } catch (err) {
+            console.log(`[GIFSKI_PATH] Устанавливаю права на выполнение для ${localPath}`);
+            fs.chmodSync(localPath, 0o755);
+        }
+        return localPath;
+    }
     
     if (isDev) {
-        // В режиме разработки - ищем в vendor
-        magickPath = path.join(__dirname, '..', 'vendor', 'imagemagick', 'magick');
+        console.error('[GIFSKI_PATH] gifski не найден ни глобально в PATH, ни локально в vendor/gifski.');
     } else {
-        // В production - ищем в extraResources
-        magickPath = path.join(process.resourcesPath, 'imagemagick', 'magick');
+        console.error(`[GIFSKI_PATH] gifski не найден в packaged-приложении по пути: ${localPath}`);
     }
-
-    console.log(`[MAGICK_PATH] Проверяю путь: ${magickPath}. Режим разработки: ${isDev}`);
     
-    if (fs.existsSync(magickPath)) {
-        console.log(`[MAGICK_PATH] Бинарный файл ImageMagick найден.`);
-        
-        // Проверяем и устанавливаем права на выполнение
-        try {
-            fs.accessSync(magickPath, fs.constants.X_OK);
-        } catch (err) {
-            console.log(`[MAGICK_PATH] Устанавливаю права на выполнение...`);
-            fs.chmodSync(magickPath, 0o755);
-        }
-        
-        return magickPath;
-    } else {
-        console.error(`[MAGICK_PATH] Бинарный файл ImageMagick не найден!`);
-        
-        // Дополнительная диагностика
-        const resourcesPath = isDev ? path.join(__dirname, '..') : process.resourcesPath;
-        console.error(`[MAGICK_PATH] Resources path: ${resourcesPath}`);
-        
-        try {
-            const contents = fs.readdirSync(resourcesPath);
-            console.error(`[MAGICK_PATH] Contents of resources: ${contents.join(', ')}`);
-            
-            const imagemagickPath = path.join(resourcesPath, isDev ? 'vendor/imagemagick' : 'imagemagick');
-            if (fs.existsSync(imagemagickPath)) {
-                const magickContents = fs.readdirSync(imagemagickPath);
-                console.error(`[MAGICK_PATH] Contents of imagemagick folder: ${magickContents.join(', ')}`);
-            }
-        } catch (e) {
-            console.error(`[MAGICK_PATH] Error listing directory: ${e.message}`);
-        }
-        
-        return magickPath; 
-    }
+    return null;
 }
 
-// Функция-обертка для вызова Magick с логированием
-function runMagick(args) {
-    const magickPath = getMagickPath();
+// Функция для проверки, доступен ли gifski
+function checkGifski() {
+    gifskiPath = findGifskiPath();
+    if (!gifskiPath) {
+        console.error('[GIFSKI_CHECK] gifski не найден. Пожалуйста, установите его или поместите в папку vendor/gifski.');
+        return false;
+    }
+    return true;
+}
+
+// Функция-обертка для вызова gifski с логированием
+function runGifski(args) {
+    if (!gifskiPath) {
+        return Promise.reject(new Error('Путь к gifski не был определен.'));
+    }
 
     return new Promise((resolve, reject) => {
-        console.log(`[RUN_MAGICK] Запуск команды: ${magickPath} ${args.join(' ')}`);
+        const commandStr = `gifski ${args.join(' ')}`;
+        console.log(`[RUN_GIFSKI] Запуск команды: ${gifskiPath} ${args.join(' ')}`);
         
-        // Устанавливаем переменные окружения для macOS
-        const env = { ...process.env };
-        if (process.platform === 'darwin') {
-            const libPath = path.dirname(magickPath);
-            env.DYLD_LIBRARY_PATH = path.join(libPath, 'libs') + ':' + (env.DYLD_LIBRARY_PATH || '');
-            console.log(`[RUN_MAGICK] DYLD_LIBRARY_PATH: ${env.DYLD_LIBRARY_PATH}`);
-        }
-        
-        const command = spawn(magickPath, args, { env });
+        const command = spawn(gifskiPath, args);
         let stdout = '';
         let stderr = '';
 
@@ -86,43 +87,30 @@ function runMagick(args) {
 
         command.on('close', (code) => {
             if (code === 0) {
-                console.log(`[RUN_MAGICK] Команда выполнена успешно.`);
-                resolve(stdout);
+                console.log(`[RUN_GIFSKI] Команда выполнена успешно.`);
+                resolve({ stdout, stderr });
             } else {
-                const errorMessage = `ImageMagick завершился с кодом ${code}: ${stderr}`;
-                console.error(`[RUN_MAGICK] Ошибка выполнения команды. ${errorMessage}`);
+                const errorMessage = `gifski завершился с кодом ${code}: ${stderr}`;
+                console.error(`[RUN_GIFSKI] Ошибка выполнения команды. ${errorMessage}`);
                 reject(new Error(errorMessage));
             }
         });
 
         command.on('error', (err) => {
-            console.error('[RUN_MAGICK] Не удалось запустить дочерний процесс.', err);
+            console.error('[RUN_GIFSKI] Не удалось запустить дочерний процесс.', err);
             reject(err);
         });
     });
 }
 
-// Функция для проверки, доступен ли ImageMagick
-function checkImageMagick() {
-    console.log('[IMAGEMAGICK_CHECK] Запускаю проверку ImageMagick...');
-    return runMagick(['--version'])
-        .then(stdout => {
-            console.log(`[IMAGEMAGICK_CHECK] Проверка успешна! Версия: ${stdout.trim()}`);
-            return true;
-        })
-        .catch(err => {
-            console.error('[IMAGEMAGICK_CHECK] Проверка провалена!', err);
-            return false;
-        });
-}
-
 function createWindow() {
     const configPath = path.join(__dirname, 'config.json');
-    const defaultConfig = { maxKb: 10, frameDelay: 0.1, colorCount: 256, dither: 'none' };
+    // Упрощаем конфиг для gifski
+    const defaultConfig = { maxKb: 10240, frameDelay: 3, quality: 90 };
     let config = defaultConfig;
     try {
         if (fs.existsSync(configPath)) {
-            config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            config = { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf-8')) };
         } else {
             fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 4));
         }
@@ -137,7 +125,6 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            config: config
         }
     });
 
@@ -164,23 +151,16 @@ app.on('activate', () => {
     }
 });
 
-// Получение информации о GIF файле
+// Получение информации о GIF файле (теперь используем fs, т.к. gifski не имеет аналога identify)
 async function getGifInfo(filePath) {
     try {
-        // Формат: ширина высота размер_в_байтах
-        const format = "%w %h %b";
-        const stdout = await runMagick(['identify', '-format', format, filePath]);
-        const parts = stdout.trim().replace('B', '').split(' ');
-        
-        if (parts.length < 3) throw new Error('Неверный вывод от ImageMagick');
-
+        const stats = fs.statSync(filePath);
+        // Для размеров придется использовать стороннюю логику, если это будет нужно.
+        // Пока возвращаем только размер файла.
         return {
             success: true,
-            size: parseInt(parts[2], 10),
-            dimensions: {
-                width: parseInt(parts[0], 10),
-                height: parseInt(parts[1], 10)
-            }
+            size: stats.size,
+            dimensions: { width: '?', height: '?' } // gifski не возвращает размеры
         };
     } catch (err) {
         console.error(`Ошибка получения информации о GIF (${filePath}):`, err);
@@ -200,21 +180,18 @@ ipcMain.handle('choose-directory', async () => {
     return { success: false, error: 'Директория не выбрана' };
 });
 
+// Заменяем проверку ImageMagick на gifski
 ipcMain.handle('check-imagemagick', async () => {
-    return await checkImageMagick();
-});
-
-ipcMain.handle('get-gif-info', async (event, { filePath, ditherType }) => {
-    const info = await getGifInfo(filePath);
-    info.ditherType = ditherType;
-    return info;
+    return checkGifski();
 });
 
 // Получение списка PNG файлов
 async function getPngFiles(directory) {
     try {
         const files = fs.readdirSync(directory);
-        const pngFiles = files.filter(file => file.toLowerCase().endsWith('.png'));
+        const pngFiles = files
+            .filter(file => file.toLowerCase().endsWith('.png'))
+            .map(file => path.join(directory, file)); // Сразу получаем полные пути
         
         if (pngFiles.length === 0) {
             return { success: false, error: 'PNG файлы не найдены в выбранной директории' };
@@ -222,22 +199,23 @@ async function getPngFiles(directory) {
 
         // Группировка файлов по имени (без номера)
         const groups = {};
-        pngFiles.forEach(file => {
-            const baseName = file.replace(/\d+\.png$/, '');
+        pngFiles.forEach(filePath => {
+            const fileName = path.basename(filePath);
+            const baseName = fileName.replace(/_\d+\.png$|\.png$/, '');
             if (!groups[baseName]) {
                 groups[baseName] = [];
             }
             groups[baseName].push({
-                name: file,
-                path: path.join(directory, file)
+                name: fileName,
+                path: filePath
             });
         });
 
-        // Сортировка файлов в каждой группе
-        for (const group in groups) {
-            groups[group].sort((a, b) => {
-                const numA = parseInt(a.name.match(/\d+/)?.[0] || '0');
-                const numB = parseInt(b.name.match(/\d+/)?.[0] || '0');
+        // Сортировка файлов в каждой группе по числовому индексу
+        for (const groupName in groups) {
+            groups[groupName].sort((a, b) => {
+                const numA = parseInt(a.name.match(/_(\d+)\.png$/)?.[1] || '0');
+                const numB = parseInt(b.name.match(/_(\d+)\.png$/)?.[1] || '0');
                 return numA - numB;
             });
         }
@@ -260,10 +238,10 @@ ipcMain.handle('open-folder', (event, folderPath) => {
 
 ipcMain.handle('get-config', () => {
     const configPath = path.join(__dirname, 'config.json');
-    const defaultConfig = { maxKb: 10, frameDelay: 0.1, colorCount: 256, dither: 'none' };
+    const defaultConfig = { maxKb: 10240, frameDelay: 3, quality: 90 };
     try {
         if (fs.existsSync(configPath)) {
-            return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            return { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf-8')) };
         }
     } catch (error) {
         console.error('Error reading config file for renderer:', error);
@@ -271,86 +249,62 @@ ipcMain.handle('get-config', () => {
     return defaultConfig;
 });
 
-// Convert multiple PNGs to GIF using ImageMagick
-async function convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, initialColorCount, ditherType) {
+// Новая функция конвертации с использованием gifski
+async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality) {
     const gifFolder = path.join(outputDir, 'GIF');
     if (!fs.existsSync(gifFolder)) {
         fs.mkdirSync(gifFolder);
     }
-
-    const outputPath = path.join(gifFolder, `${groupName}.gif`);
-    const frameDelayTicks = Math.round(frameDelay / 10);
-
-    let colorCount = initialColorCount;
-    const colorSteps = [256, 128, 64, 32];
-    let finalSize = 0;
-    let colorsReduced = false;
-
-    for (const colors of colorSteps) {
-        if (colors > initialColorCount && initialColorCount !== colors) continue;
-        colorCount = colors;
-
-        const args = [
-            'convert',
-            '-delay', frameDelayTicks.toString(),
-            '-loop', '0',
-            ...pngFilePaths,
-            '+map'
-        ];
-
-        if (ditherType !== 'none') {
-            args.push('-dither', ditherType);
-        }
-
-        args.push('-colors', colorCount.toString());
-        args.push('-layers', 'optimize');
-        args.push(outputPath);
-
-        try {
-            await runMagick(args);
-            const stats = fs.statSync(outputPath);
-            finalSize = stats.size;
-
-            if (finalSize <= maxKB * 1024) {
-                if (colorCount < initialColorCount) {
-                    colorsReduced = true;
-                }
-                break; 
-            }
-        } catch (err) {
-            console.error('Error converting to GIF:', err);
-            return { success: false, error: err.message };
-        }
-    }
-
-    const reportPath = path.join(gifFolder, 'report.txt');
-    let reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, 'utf-8') : '';
     
-    if (!reportContent.includes('ЖИФ Конвертер - Отчет о конвертации')) {
-        reportContent = `
-ЖИФ Конвертер - Отчет о конвертации
-=====================================
-Дата: ${new Date().toLocaleString()}
+    const outputPath = path.join(gifFolder, `${groupName}.gif`);
+    
+    // gifski использует fps, а не задержку. Конвертируем.
+    const fps = Math.round(1 / frameDelay);
 
-Настройки (изначальные):\n-------------------------\n- Максимальный размер файла: ${maxKB} КБ\nЗадержка между кадрами: ${frameDelay} ms\nКоличество цветов: ${initialColorCount}\nДизеринг: ${ditherType}\n
+    const logFilePath = path.join(gifFolder, 'conversion_log.txt');
+    const log = (message) => {
+        const timestamp = `[${new Date().toISOString()}]`;
+        const logMessage = `${timestamp} ${message}\n`;
+        // Очищаем лог для новой группы, чтобы избежать путаницы
+        if (!fs.existsSync(logFilePath) || fs.readFileSync(logFilePath, 'utf-8').includes(groupName)) {
+            fs.appendFileSync(logFilePath, logMessage);
+        } else {
+            fs.writeFileSync(logFilePath, logMessage);
+        }
+    };
 
-Результаты:
------------
-`;
+    log(`Начало конвертации для группы: ${groupName}`);
+    log(`Параметры: fps=${fps} (из ${frameDelay}s задержки), quality=${quality}`);
+
+    const args = [
+        '--fps', fps.toString(),
+        '--quality', quality.toString(),
+        '-o', outputPath,
+        ...pngFilePaths // передаем отсортированный список путей
+    ];
+
+    try {
+        const commandString = `gifski ${args.join(' ')}`;
+        log(`Выполнение команды: ${commandString}`);
+
+        const { stdout, stderr } = await runGifski(args);
+        
+        if (stdout) log(`STDOUT:\n${stdout}`);
+        if (stderr) log(`STDERR:\n${stderr}`);
+        
+        const info = await getGifInfo(outputPath);
+
+        log(`Успех: Конвертация завершена. Размер файла = ${(info.size / 1024).toFixed(1)} KB`);
+        log('=================================================\n');
+
+        return { ...info, path: outputPath, finalColorCount: 256 }; // gifski всегда использует до 256 цветов
+    } catch (err) {
+        console.error(`Ошибка при конвертации группы ${groupName}:`, err);
+        log(`ОШИБКА: ${err.message}`);
+        return { success: false, error: err.message };
     }
-
-    reportContent += `
-* ${groupName}.gif:
-  - Размер: ${(finalSize / 1024).toFixed(1)} КБ
-  - Количество цветов: ${colorCount}${colorsReduced ? ` (уменьшено с ${initialColorCount})` : ''}
-`;
-
-    fs.writeFileSync(reportPath, reportContent);
-
-    const info = await getGifInfo(outputPath);
-    return { ...info, path: outputPath, ditherType, colorsReduced, finalColorCount: colorCount, initialColorCount };
 }
 
-ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType }) => {
-    return await convertToGif(groupName, pngFilePaths, outputDir, maxKB, frameDelay, colorCount, ditherType);
+ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, frameDelay, quality }) => {
+    return await convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality);
 });
