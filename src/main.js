@@ -20,7 +20,6 @@ let gifskiPath; // Глобальная переменная для хранен
 
 // Функция для поиска gifski
 function findGifskiPath() {
-    // 1. В режиме разработки, приоритет у глобальной версии для скорости
     if (isDev) {
         try {
             const systemPath = execSync('which gifski', { encoding: 'utf-8' }).trim();
@@ -29,37 +28,41 @@ function findGifskiPath() {
                 return systemPath;
             }
         } catch (error) {
-            console.log('[GIFSKI_PATH] Глобальный gifski не найден, ищем локальную версию как fallback...');
+            console.log('[GIFSKI_PATH] Глобальный gifski не найден, ищем локальную версию...');
         }
     }
-
-    // 2. Локальная версия (vendor для dev, resources для prod)
-    let localPath;
-    if (isDev) {
-        // Fallback для разработки
-        localPath = path.join(__dirname, '..', 'vendor', 'gifski', 'gifski');
-    } else {
-        // Основной путь для готового приложения
-        localPath = path.join(process.resourcesPath, 'gifski');
-    }
-
+    const localPath = isDev ? path.join(__dirname, '..', 'vendor', 'gifski', 'gifski') : path.join(process.resourcesPath, 'gifski');
     if (fs.existsSync(localPath)) {
         console.log(`[GIFSKI_PATH] Используется локальный gifski: ${localPath}`);
-        try {
-            fs.accessSync(localPath, fs.constants.X_OK);
-        } catch (err) {
-            console.log(`[GIFSKI_PATH] Устанавливаю права на выполнение для ${localPath}`);
-            fs.chmodSync(localPath, 0o755);
-        }
+        try { fs.accessSync(localPath, fs.constants.X_OK); } catch (err) { fs.chmodSync(localPath, 0o755); }
         return localPath;
     }
-    
-    if (isDev) {
-        console.error('[GIFSKI_PATH] gifski не найден ни глобально в PATH, ни локально в vendor/gifski.');
-    } else {
-        console.error(`[GIFSKI_PATH] gifski не найден в packaged-приложении по пути: ${localPath}`);
+    console.error('[GIFSKI_PATH] gifski не найден.');
+    return null;
+}
+
+// ============== НОВАЯ ФУНКЦИЯ ДЛЯ ПОИСКА GIFSICLE ==============
+function findGifsiclePath() {
+    // Сначала пробуем найти gifsicle в системном PATH. Это самый частый случай для разработчиков.
+     try {
+        const systemPath = execSync('which gifsicle', { encoding: 'utf-8' }).trim();
+        if (systemPath && fs.existsSync(systemPath)) {
+            console.log(`[GIFSICLE_PATH] Используется системный gifsicle из PATH: ${systemPath}`);
+            return systemPath;
+        }
+    } catch (error) {
+       // Игнорируем ошибку, если в PATH нет, и ищем локально.
     }
     
+    // Если не нашли в PATH, ищем локально в vendor/resources
+    const localPath = isDev ? path.join(__dirname, '..', 'vendor', 'gifsicle', 'gifsicle') : path.join(process.resourcesPath, 'gifsicle');
+    if (fs.existsSync(localPath)) {
+        console.log(`[GIFSICLE_PATH] Используется локальный gifsicle: ${localPath}`);
+        try { fs.accessSync(localPath, fs.constants.X_OK); } catch (err) { fs.chmodSync(localPath, 0o755); }
+        return localPath;
+    }
+
+    console.warn('[GIFSICLE_PATH] Утилита gifsicle не найдена. Оптимизация не будет выполнена. Для установки: brew install gifsicle');
     return null;
 }
 
@@ -73,41 +76,35 @@ function checkGifski() {
     return true;
 }
 
-// Функция-обертка для вызова gifski с логированием
-function runGifski(args) {
-    if (!gifskiPath) {
-        return Promise.reject(new Error('Путь к gifski не был определен.'));
+// Универсальная функция для запуска дочерних процессов
+function runCommand(toolName, binaryPath, args) {
+    if (!binaryPath) {
+        return Promise.reject(new Error(`Путь к ${toolName} не определен.`));
     }
 
     return new Promise((resolve, reject) => {
-        const commandStr = `gifski ${args.join(' ')}`;
-        console.log(`[RUN_GIFSKI] Запуск команды: ${gifskiPath} ${args.join(' ')}`);
+        const commandStr = `${path.basename(binaryPath)} ${args.join(' ')}`;
+        console.log(`[RUN_COMMAND] Запуск: ${commandStr}`);
         
-        const command = spawn(gifskiPath, args);
+        const command = spawn(binaryPath, args);
         let stdout = '';
         let stderr = '';
 
-        command.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        command.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
+        command.stdout.on('data', (data) => { stdout += data.toString(); });
+        command.stderr.on('data', (data) => { stderr += data.toString(); });
 
         command.on('close', (code) => {
             if (code === 0) {
-                console.log(`[RUN_GIFSKI] Команда выполнена успешно.`);
                 resolve({ stdout, stderr });
             } else {
-                const errorMessage = `gifski завершился с кодом ${code}: ${stderr}`;
-                console.error(`[RUN_GIFSKI] Ошибка выполнения команды. ${errorMessage}`);
+                const errorMessage = `${toolName} завершился с кодом ${code}: ${stderr}`;
+                console.error(`[RUN_COMMAND] Ошибка выполнения. ${errorMessage}`);
                 reject(new Error(errorMessage));
             }
         });
 
         command.on('error', (err) => {
-            console.error('[RUN_GIFSKI] Не удалось запустить дочерний процесс.', err);
+            console.error(`[RUN_COMMAND] Не удалось запустить ${toolName}.`, err);
             reject(err);
         });
     });
@@ -392,92 +389,88 @@ ipcMain.handle('get-config', () => {
     return defaultConfig;
 });
 
-// Новая функция конвертации с использованием gifski
-async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb = 512, colorCount = 256, ditherType = 'floyd') {
+// Основная функция конвертации
+async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb = 500, colorCount = 256, ditherType = 'floyd') {
     const gifFolder = path.join(outputDir, 'GIF');
     if (!fs.existsSync(gifFolder)) {
         fs.mkdirSync(gifFolder);
     }
     
-    const outputPath = path.join(gifFolder, `${groupName}.gif`);
+    const finalOutputPath = path.join(gifFolder, `${groupName}.gif`);
     
-    // gifski использует fps, а не задержку. Конвертируем и ограничиваем.
-    let fps = Math.round(1 / frameDelay);
-    if (fps > 100) {
-        console.warn(`[CONVERT] FPS ${fps} is too high, capping at 100.`);
-        fps = 100; // gifski has a hard limit of 100 fps
+    // Логика дублирования кадров для gifski для создания задержки
+    const baseFps = 10;
+    let finalFps = baseFps;
+    let finalPngFilePaths = [...pngFilePaths];
+
+    if (frameDelay > (1 / baseFps)) {
+        const duplicationFactor = Math.round(frameDelay * baseFps);
+        if (duplicationFactor > 1) {
+             finalPngFilePaths = pngFilePaths.flatMap(p => Array(duplicationFactor).fill(p));
+        }
+    } else if (frameDelay > 0) {
+        finalFps = Math.round(1 / frameDelay);
+        if (finalFps > 100) finalFps = 100;
     }
 
-    const logFilePath = path.join(gifFolder, 'conversion_log.txt');
-    const log = (message) => {
-        const timestamp = `[${new Date().toISOString()}]`;
-        const logMessage = `${timestamp} ${message}\n`;
-        // Очищаем лог для новой группы, чтобы избежать путаницы
-        if (!fs.existsSync(logFilePath) || fs.readFileSync(logFilePath, 'utf-8').includes(groupName)) {
-            fs.appendFileSync(logFilePath, logMessage);
-        } else {
-            fs.writeFileSync(logFilePath, logMessage);
-        }
-    };
+    let currentQuality = quality;
+    const minQuality = 30;
 
-    log(`Начало конвертации для группы: ${groupName}`);
-    log(`Параметры: fps=${fps} (из ${frameDelay}s задержки), quality=${quality}`);
+    while (currentQuality >= minQuality) {
+        const tempOutputPath = path.join(gifFolder, `${groupName}_quality-${currentQuality}_temp.gif`);
+        
+        try {
+            // --- ШАГ 1: Создание GIF с помощью gifski ---
+            const gifskiPath = findGifskiPath();
+            const firstImage = await Image.load(pngFilePaths[0]);
+            const { width, height } = firstImage;
 
-    try {
-        // Получаем размеры из первого изображения, чтобы передать их gifski
-        const firstImage = await Image.load(pngFilePaths[0]);
-        const { width, height } = firstImage;
-        log(`Исходное разрешение: ${width}x${height}`);
-
-        let currentQuality = quality;
-        let attempt = 1;
-        let finalInfo = null;
-        while (true) {
-            log(`Attempt #${attempt} with quality=${currentQuality}`);
-            const args = [
-                '--fps', fps.toString(),
+            const gifskiArgs = [
+                '--fps', finalFps.toString(),
                 '--quality', currentQuality.toString(),
                 '--width', width.toString(),
                 '--height', height.toString(),
+                '-o', tempOutputPath,
+                ...finalPngFilePaths
             ];
+            
+            await runCommand('gifski', gifskiPath, gifskiArgs);
 
-            // dither handling
-            if (ditherType === 'none') {
-                args.push('--lossy-quality', '100', '--motion-quality', '100');
+            // --- ШАГ 2: Оптимизация с помощью gifsicle ---
+            const gifsiclePath = findGifsiclePath();
+            if (gifsiclePath) {
+                 await runCommand('gifsicle', gifsiclePath, ['-O3', tempOutputPath, '-o', finalOutputPath]);
+                 fs.unlinkSync(tempOutputPath); // Удаляем временный файл
+            } else {
+                fs.renameSync(tempOutputPath, finalOutputPath);
             }
 
-            args.push('-o', outputPath);
-            args.push(...pngFilePaths);
-
-            const commandString = `gifski ${args.join(' ')}`;
-            log(`Выполнение команды: ${commandString}`);
-
-            await runGifski(args);
-
-            const info = await getGifInfo(outputPath);
-            finalInfo = info;
-            log(`Размер после попытки #${attempt}: ${(info.size / 1024).toFixed(1)} KB`);
-
-            if (info.size / 1024 <= maxKb || currentQuality <= 30) {
-                if (info.size / 1024 > maxKb) {
-                    log(`Не удалось достичь целевого размера ${maxKb}KB. Останавливаемся на качестве ${currentQuality}.`);
-                }
-                break;
+            // --- ШАГ 3: Проверка размера ---
+            const finalInfo = await getGifInfo(finalOutputPath);
+            if (finalInfo.size / 1024 <= maxKb) {
+                console.log(`[SUCCESS] Target size met. Quality: ${currentQuality}, Size: ${(finalInfo.size / 1024).toFixed(1)} KB`);
+                return { success: true, ...finalInfo, path: finalOutputPath, finalColorCount: 256 };
             }
 
+            console.warn(`[RETRY] File too large (${(finalInfo.size / 1024).toFixed(1)} KB > ${maxKb} KB). Reducing quality from ${currentQuality} and retrying.`);
             currentQuality -= 10;
-            attempt++;
+             if (fs.existsSync(finalOutputPath)) {
+                fs.unlinkSync(finalOutputPath); // Удаляем слишком большой файл перед следующей попыткой
+            }
+
+        } catch (err) {
+            console.error(`Ошибка при конвертации группы ${groupName} с качеством ${currentQuality}:`, err);
+            if (fs.existsSync(tempOutputPath)) fs.unlinkSync(tempOutputPath);
+            if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
+            return { success: false, error: err.message };
         }
-
-        log(`Финальная информация: файл ${(finalInfo.size / 1024).toFixed(1)}KB`);
-        log('=================================================\n');
-
-        return { success: true, ...finalInfo, path: outputPath, finalColorCount: 256 };
-    } catch (err) {
-        console.error(`Ошибка при конвертации группы ${groupName}:`, err);
-        log(`ОШИБКА: ${err.message}`);
-        return { success: false, error: err.message };
     }
+
+    console.error(`[FAILURE] Could not meet target size of ${maxKb} KB. Smallest file was too large at quality ${minQuality}.`);
+    return { 
+        success: false, 
+        error: `Не удалось достичь размера < ${maxKb} КБ. Попробуйте уменьшить разрешение изображений.` 
+    };
 }
 
 ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb, colorCount, ditherType }) => {

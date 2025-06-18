@@ -401,7 +401,7 @@ if (convertButton) {
                         outputDir: selectedDirectory,
                         frameDelay: frameDelaySeconds,
                         quality: 90,
-                        maxKb: 2048,
+                        maxKb: 500,
                         colorCount: colorCount,
                         ditherType: 'floyd',
                     });
