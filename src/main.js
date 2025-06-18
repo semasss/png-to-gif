@@ -6,6 +6,15 @@ const { spawn, execSync } = require('child_process');
 const { shell } = require('electron');
 const { Image } = require('image-js');
 
+// Глобальная обработка ошибок
+process.on('uncaughtException', (error) => {
+    console.error('[MAIN] Необработанное исключение:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[MAIN] Необработанный rejection:', reason);
+});
+
 let mainWindow;
 let gifskiPath; // Глобальная переменная для хранения пути
 
@@ -105,19 +114,31 @@ function runGifski(args) {
 }
 
 function createWindow() {
+    console.log('[MAIN] Создание главного окна...');
+    
     const configPath = path.join(__dirname, 'config.json');
-    // Упрощаем конфиг для gifski
     const defaultConfig = { maxKb: 10240, frameDelay: 3, quality: 90 };
     let config = defaultConfig;
+    
     try {
         if (fs.existsSync(configPath)) {
             config = { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf-8')) };
+            console.log('[MAIN] Конфигурация загружена:', config);
         } else {
             fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 4));
+            console.log('[MAIN] Создан файл конфигурации по умолчанию');
         }
     } catch (error) {
-        console.error('Error with config file:', error);
+        console.error('[MAIN] Ошибка с файлом конфигурации:', error);
     }
+
+    // Проверяем доступность preload.js
+    const preloadPath = path.join(__dirname, 'preload.js');
+    if (!fs.existsSync(preloadPath)) {
+        console.error('[MAIN] КРИТИЧЕСКАЯ ОШИБКА: preload.js не найден по пути:', preloadPath);
+        throw new Error(`preload.js не найден: ${preloadPath}`);
+    }
+    console.log('[MAIN] preload.js найден:', preloadPath);
 
     mainWindow = new BrowserWindow({
         width: 800,
@@ -125,17 +146,46 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js'),
+            preload: preloadPath,
+            enableRemoteModule: false,
+            webSecurity: true,
+            experimentalFeatures: false
         }
     });
 
-    // Load the index.html
-    mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    // Обработчики событий окна для диагностики
+    mainWindow.webContents.on('did-finish-load', () => {
+        console.log('[MAIN] Страница загружена');
+        // Отправляем сигнал в renderer что main готов
+        mainWindow.webContents.send('main-ready');
+    });
 
-    // Open DevTools if in development mode
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        console.error('[MAIN] Ошибка загрузки страницы:', errorCode, errorDescription);
+    });
+
+    mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
+    });
+
+    // Проверяем доступность index.html
+    const indexPath = path.join(__dirname, 'index.html');
+    if (!fs.existsSync(indexPath)) {
+        console.error('[MAIN] КРИТИЧЕСКАЯ ОШИБКА: index.html не найден по пути:', indexPath);
+        throw new Error(`index.html не найден: ${indexPath}`);
+    }
+    console.log('[MAIN] index.html найден:', indexPath);
+
+    // Загружаем страницу
+    mainWindow.loadFile(indexPath);
+
+    // Открываем DevTools в режиме разработки
     if (isDev) {
         mainWindow.webContents.openDevTools();
+        console.log('[MAIN] DevTools открыты');
     }
+    
+    console.log('[MAIN] Главное окно создано успешно');
 }
 
 app.whenReady().then(createWindow);
@@ -169,16 +219,73 @@ async function getGifInfo(filePath) {
     }
 }
 
-// Обработчики IPC
-ipcMain.handle('choose-directory', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openDirectory']
-    });
+// Диагностический ping
+ipcMain.handle('ping', async () => {
+    console.log('[MAIN] Получен ping от renderer');
+    return 'pong';
+});
+
+// Улучшенный обработчик choose-directory с дополнительными проверками
+ipcMain.handle('choose-directory', async (event) => {
+    console.log('[MAIN] Обработка запроса выбора директории');
     
-    if (!result.canceled) {
-        return { success: true, path: result.filePaths[0] };
+    try {
+        // Проверяем доступность dialog
+        if (!dialog || typeof dialog.showOpenDialog !== 'function') {
+            throw new Error('dialog.showOpenDialog недоступен');
+        }
+        
+        console.log('[MAIN] Открытие диалога выбора папки...');
+        
+        const result = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory'],
+            title: 'Выберите папку с PNG файлами',
+            buttonLabel: 'Выбрать папку'
+        });
+        
+        console.log('[MAIN] Результат диалога:', result);
+        
+        if (result.canceled) {
+            console.log('[MAIN] Выбор папки отменен пользователем');
+            return { success: false, error: 'Выбор отменен' };
+        }
+        
+        if (!result.filePaths || result.filePaths.length === 0) {
+            console.warn('[MAIN] Пустой результат выбора папки');
+            return { success: false, error: 'Папка не выбрана' };
+        }
+        
+        const selectedPath = result.filePaths[0];
+        console.log('[MAIN] Выбрана папка:', selectedPath);
+        
+        // Проверяем существование и доступность папки
+        try {
+            const stats = fs.statSync(selectedPath);
+            if (!stats.isDirectory()) {
+                throw new Error('Выбранный путь не является папкой');
+            }
+            
+            // Проверяем права на чтение
+            fs.accessSync(selectedPath, fs.constants.R_OK);
+            
+            console.log('[MAIN] Папка доступна для чтения');
+            return { success: true, path: selectedPath };
+            
+        } catch (fsError) {
+            console.error('[MAIN] Ошибка доступа к папке:', fsError);
+            return { 
+                success: false, 
+                error: `Ошибка доступа к папке: ${fsError.message}` 
+            };
+        }
+        
+    } catch (error) {
+        console.error('[MAIN] Ошибка в choose-directory:', error);
+        return { 
+            success: false, 
+            error: `Ошибка выбора папки: ${error.message}` 
+        };
     }
-    return { success: false, error: 'Директория не выбрана' };
 });
 
 // Заменяем проверку ImageMagick на gifski
@@ -186,23 +293,54 @@ ipcMain.handle('check-imagemagick', async () => {
     return checkGifski();
 });
 
-// Получение списка PNG файлов
+// Улучшенная функция получения PNG файлов
 async function getPngFiles(directory) {
+    console.log('[MAIN] Получение PNG файлов из директории:', directory);
+    
+    if (!directory || typeof directory !== 'string') {
+        const error = 'Неверный путь к директории';
+        console.error('[MAIN]', error);
+        return { success: false, error };
+    }
+    
     try {
+        // Проверяем существование директории
+        if (!fs.existsSync(directory)) {
+            throw new Error('Директория не существует');
+        }
+        
+        const stats = fs.statSync(directory);
+        if (!stats.isDirectory()) {
+            throw new Error('Путь не является директорией');
+        }
+        
+        console.log('[MAIN] Чтение содержимого директории...');
         const files = fs.readdirSync(directory);
+        console.log('[MAIN] Найдено файлов:', files.length);
+        
         const pngFiles = files
-            .filter(file => file.toLowerCase().endsWith('.png'))
-            .map(file => path.join(directory, file)); // Сразу получаем полные пути
+            .filter(file => {
+                const ext = file.toLowerCase();
+                return ext.endsWith('.png');
+            })
+            .map(file => path.join(directory, file));
+        
+        console.log('[MAIN] PNG файлов найдено:', pngFiles.length);
         
         if (pngFiles.length === 0) {
-            return { success: false, error: 'PNG файлы не найдены в выбранной директории' };
+            return { 
+                success: false, 
+                error: 'PNG файлы не найдены в выбранной директории' 
+            };
         }
 
         // Группировка файлов по имени (без номера)
         const groups = {};
         pngFiles.forEach(filePath => {
             const fileName = path.basename(filePath);
-            const baseName = fileName.replace(/_\d+\.png$|\.png$/, '');
+            // Улучшенная регулярка для группировки
+            const baseName = fileName.replace(/_\d+\.png$/i, '').replace(/\.png$/i, '');
+            
             if (!groups[baseName]) {
                 groups[baseName] = [];
             }
@@ -215,15 +353,19 @@ async function getPngFiles(directory) {
         // Сортировка файлов в каждой группе по числовому индексу
         for (const groupName in groups) {
             groups[groupName].sort((a, b) => {
-                const numA = parseInt(a.name.match(/_(\d+)\.png$/)?.[1] || '0');
-                const numB = parseInt(b.name.match(/_(\d+)\.png$/)?.[1] || '0');
+                const numA = parseInt(a.name.match(/_([0-9]+)\.png$/i)?.[1] || '0');
+                const numB = parseInt(b.name.match(/_([0-9]+)\.png$/i)?.[1] || '0');
                 return numA - numB;
             });
         }
 
+        const groupCount = Object.keys(groups).length;
+        console.log('[MAIN] Создано групп:', groupCount);
+
         return { success: true, groups };
+        
     } catch (error) {
-        console.error('Error getting PNG files:', error);
+        console.error('[MAIN] Ошибка получения PNG файлов:', error);
         return { success: false, error: error.message };
     }
 }
@@ -259,8 +401,12 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
     
     const outputPath = path.join(gifFolder, `${groupName}.gif`);
     
-    // gifski использует fps, а не задержку. Конвертируем.
-    const fps = Math.round(1 / frameDelay);
+    // gifski использует fps, а не задержку. Конвертируем и ограничиваем.
+    let fps = Math.round(1 / frameDelay);
+    if (fps > 100) {
+        console.warn(`[CONVERT] FPS ${fps} is too high, capping at 100.`);
+        fps = 100; // gifski has a hard limit of 100 fps
+    }
 
     const logFilePath = path.join(gifFolder, 'conversion_log.txt');
     const log = (message) => {
@@ -337,3 +483,22 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
 ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb, colorCount, ditherType }) => {
     return await convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb, colorCount, ditherType);
 });
+
+// Логирование всех IPC событий
+const originalHandle = ipcMain.handle;
+ipcMain.handle = function(channel, listener) {
+    console.log('[MAIN] Регистрация IPC обработчика:', channel);
+    return originalHandle.call(this, channel, async (...args) => {
+        console.log(`[MAIN] IPC вызов: ${channel}`, args.slice(1)); // Исключаем event объект
+        try {
+            const result = await listener(...args);
+            console.log(`[MAIN] IPC результат ${channel}:`, result);
+            return result;
+        } catch (error) {
+            console.error(`[MAIN] IPC ошибка ${channel}:`, error);
+            throw error;
+        }
+    });
+};
+
+console.log('[MAIN] Диагностические дополнения загружены');
