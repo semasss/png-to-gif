@@ -6,6 +6,15 @@ let groupedFiles = {};
 let conversionResults = [];
 let defaultConfig = {};
 
+// Подписка на события прогресса
+window.electronAPI.onConversionProgress((data) => {
+    const { groupName, status } = data;
+    const detailStatus = document.getElementById('detail-status');
+    if (detailStatus) {
+        detailStatus.textContent = `${groupName}: ${status}`;
+    }
+});
+
 // DOM Elements
 const directoryDisplay = document.getElementById('directory-display');
 const chooseDirectoryBtn = document.getElementById('choose-directory');
@@ -347,7 +356,7 @@ function displayFiles(groups) {
     }
     
     for (const [groupName, files] of Object.entries(groups)) {
-        const groupItem = document.createElement('li');
+        const groupItem = document.createElement('div');
         const displayName = groupName.replace(/_/g, ' ');
         groupItem.innerHTML = `<img src="file://${files[0].path}" class="tiny-preview" alt="prev"> ${displayName} <span class="muted">(${files.length})</span>`;
         fileList.appendChild(groupItem);
@@ -373,14 +382,9 @@ if (convertButton) {
         }
         
         convertButton.disabled = true;
-        
-        if (progressContainer) {
-            progressContainer.style.display = 'block';
-        }
-        
-        if (progressBar) {
-            progressBar.style.width = '0%';
-        }
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressText.textContent = 'Подготовка...';
         
         let totalGroups = Object.keys(groupedFiles).length;
         let completedGroups = 0;
@@ -481,12 +485,8 @@ function displayResults() {
 // Обновление прогресса
 function updateProgress(current, total) {
     const percentage = Math.round((current / total) * 100);
-    if (progressBar) {
-        progressBar.style.width = `${percentage}%`;
-    }
-    if (progressText) {
-        progressText.textContent = `${percentage}%`;
-    }
+    progressBar.style.width = `${percentage}%`;
+    progressText.textContent = `Выполнено: ${current} из ${total} (${percentage}%)`;
 }
 
 // Глобальная обработка ошибок

@@ -103,7 +103,9 @@ const electronAPI = {
                 return false;
             }
         }
-    }
+    },
+    
+    onConversionProgress: (callback) => ipcRenderer.on('conversion-progress', (_event, value) => callback(value)),
 };
 
 // Проверяем доступность contextBridge

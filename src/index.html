@@ -43,6 +43,13 @@
           </div>
         </div>
         <button id="convert-button" class="convert-btn" disabled>Жмахнуть ЖИФ <span class="arrow">›</span></button>
+        <div id="progress-container" style="display: none; margin-top: 24px;">
+          <div class="progress-bar-background">
+            <div id="progress" class="progress-bar-foreground"></div>
+          </div>
+          <p id="progress-text" style="text-align: center; margin-top: 8px; font-size: 14px; color: #6e6e73;"></p>
+          <p id="detail-status" style="text-align: center; margin-top: 4px; font-size: 12px; color: #8a8a8e;"></p>
+        </div>
       </section>
     </div>
 
@@ -62,13 +69,6 @@
         <p>Программа ищет PNG-файлы в выбранной папке, группирует их и превращает каждую группу в отдельный GIF при помощи <a href="https://gif.ski/" target="_blank">gifski</a>.</p>
       </div>
     </div>
-  </div>
-
-  <div style="display:none">
-    <pre id="ascii-logo"></pre>
-    <div id="files-container"><ul id="file-list"></ul></div>
-    <div id="progress-container"><div id="progress"></div><p id="progress-text"></p></div>
-    <input type="range" id="quality-slider"><span id="quality-value"></span>
   </div>
 
   <script src="renderer.js"></script>

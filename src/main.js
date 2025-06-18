@@ -66,6 +66,25 @@ function findGifsiclePath() {
     return null;
 }
 
+// ============== НОВАЯ ФУНКЦИЯ ДЛЯ ПОИСКА IMAGEMAGICK ==============
+function findMagickPath() {
+    if (isDev) {
+        const localPath = path.join(__dirname, '..', 'vendor', 'imagemagick', 'magick');
+        if (fs.existsSync(localPath)) {
+            console.log(`[MAGICK_PATH] Режим разработки: используется локальный magick: ${localPath}`);
+            return localPath;
+        }
+    }
+    const resourcePath = path.join(process.resourcesPath, 'magick');
+     if (fs.existsSync(resourcePath)) {
+        console.log(`[MAGICK_PATH] Используется magick из ресурсов: ${resourcePath}`);
+        try { fs.accessSync(resourcePath, fs.constants.X_OK); } catch (err) { fs.chmodSync(resourcePath, 0o755); }
+        return resourcePath;
+    }
+    console.warn('[MAGICK_PATH] ImageMagick не найден. Понижение цветности недоступно.');
+    return null;
+}
+
 // Функция для проверки, доступен ли gifski
 function checkGifski() {
     gifskiPath = findGifskiPath();
@@ -198,6 +217,13 @@ app.on('activate', () => {
         createWindow();
     }
 });
+
+// Новая функция для отправки прогресса в рендерер
+function sendProgress(groupName, status) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('conversion-progress', { groupName, status });
+    }
+}
 
 // Получение информации о GIF файле (теперь используем fs, т.к. gifski не имеет аналога identify)
 async function getGifInfo(filePath) {
@@ -395,78 +421,119 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
     if (!fs.existsSync(gifFolder)) {
         fs.mkdirSync(gifFolder);
     }
-    
+
     const finalOutputPath = path.join(gifFolder, `${groupName}.gif`);
     
-    // Логика дублирования кадров для gifski для создания задержки
+    // Функция логирования
+    const logFilePath = path.join(gifFolder, 'conversion_log.txt');
+    const log = (message) => {
+        const timestamp = new Date().toISOString();
+        fs.appendFileSync(logFilePath, `[${timestamp}] ${message}\n`);
+    };
+
+    log(`--- START CONVERSION: ${groupName} ---`);
+    log(`Target size: < ${maxKb} KB, Initial Quality: ${quality}, Initial Colors: ${colorCount}`);
+
+    // Логика дублирования кадров для gifski
     const baseFps = 10;
     let finalFps = baseFps;
-    let finalPngFilePaths = [...pngFilePaths];
-
+    let duplicatedPngPaths = [...pngFilePaths];
     if (frameDelay > (1 / baseFps)) {
         const duplicationFactor = Math.round(frameDelay * baseFps);
         if (duplicationFactor > 1) {
-             finalPngFilePaths = pngFilePaths.flatMap(p => Array(duplicationFactor).fill(p));
+            duplicatedPngPaths = pngFilePaths.flatMap(p => Array(duplicationFactor).fill(p));
+            log(`Duplicating frames by factor of ${duplicationFactor} for ${frameDelay}s delay.`);
         }
     } else if (frameDelay > 0) {
         finalFps = Math.round(1 / frameDelay);
         if (finalFps > 100) finalFps = 100;
     }
 
-    let currentQuality = quality;
-    const minQuality = 30;
+    const qualityLevels = [90, 80, 70, 60, 50, 40, 30];
+    const initialColorLevels = (colorCount === 256) ? [256, 128] : [128];
 
-    while (currentQuality >= minQuality) {
-        const tempOutputPath = path.join(gifFolder, `${groupName}_quality-${currentQuality}_temp.gif`);
-        
-        try {
-            // --- ШАГ 1: Создание GIF с помощью gifski ---
-            const gifskiPath = findGifskiPath();
-            const firstImage = await Image.load(pngFilePaths[0]);
-            const { width, height } = firstImage;
-
-            const gifskiArgs = [
-                '--fps', finalFps.toString(),
-                '--quality', currentQuality.toString(),
-                '--width', width.toString(),
-                '--height', height.toString(),
-                '-o', tempOutputPath,
-                ...finalPngFilePaths
-            ];
+    for (const currentQuality of qualityLevels) {
+        for (const currentColorCount of initialColorLevels) {
             
-            await runCommand('gifski', gifskiPath, gifskiArgs);
+            sendProgress(groupName, `Качество: ${currentQuality}, Цвета: ${currentColorCount}`);
+            log(`[ATTEMPT] Quality: ${currentQuality}, Colors: ${currentColorCount}`);
 
-            // --- ШАГ 2: Оптимизация с помощью gifsicle ---
-            const gifsiclePath = findGifsiclePath();
-            if (gifsiclePath) {
-                 await runCommand('gifsicle', gifsiclePath, ['-O3', tempOutputPath, '-o', finalOutputPath]);
-                 fs.unlinkSync(tempOutputPath); // Удаляем временный файл
-            } else {
-                fs.renameSync(tempOutputPath, finalOutputPath);
+            const tempDirForPngs = path.join(gifFolder, `temp_pngs_${groupName}`);
+            const tempOutputPath = path.join(gifFolder, `${groupName}_temp.gif`);
+            let processedPngPaths = duplicatedPngPaths;
+
+            try {
+                // --- ШАГ 1: Пре-процессинг цветов с ImageMagick ---
+                const magickPath = findMagickPath();
+                if (magickPath && currentColorCount < 256) {
+                    log(`[PRE-PROCESS] Reducing colors to ${currentColorCount} using ImageMagick...`);
+                    if (!fs.existsSync(tempDirForPngs)) fs.mkdirSync(tempDirForPngs);
+                    
+                    const processedPaths = [];
+                    for (let i = 0; i < duplicatedPngPaths.length; i++) {
+                        const inputPath = duplicatedPngPaths[i];
+                        const outputPath = path.join(tempDirForPngs, `frame_${i}.png`);
+                        await runCommand('magick', magickPath, ['convert', inputPath, '+dither', '-colors', currentColorCount.toString(), outputPath]);
+                        processedPaths.push(outputPath);
+                    }
+                    processedPngPaths = processedPaths;
+                    log(`[PRE-PROCESS] Color reduction complete.`);
+                }
+
+                // --- ШАГ 2: Создание GIF с помощью gifski ---
+                const gifskiPath = findGifskiPath();
+                const firstImage = await Image.load(pngFilePaths[0]);
+                const { width, height } = firstImage;
+                
+                log(`[CONVERT] Running gifski with quality ${currentQuality}...`);
+                await runCommand('gifski', gifskiPath, [
+                    '--fps', finalFps.toString(), '--quality', currentQuality.toString(),
+                    '--width', width.toString(), '--height', height.toString(),
+                    '-o', tempOutputPath, ...processedPngPaths
+                ]);
+
+                // --- ШАГ 3: Оптимизация с помощью gifsicle ---
+                const gifsiclePath = findGifsiclePath();
+                if (gifsiclePath) {
+                    log(`[OPTIMIZE] Running gifsicle...`);
+                    await runCommand('gifsicle', gifsiclePath, ['-O3', tempOutputPath, '-o', finalOutputPath]);
+                } else {
+                    fs.renameSync(tempOutputPath, finalOutputPath);
+                }
+
+                // --- ШАГ 4: Проверка размера ---
+                const finalInfo = await getGifInfo(finalOutputPath);
+                log(`[RESULT] Output size: ${(finalInfo.size / 1024).toFixed(1)} KB`);
+
+                if (finalInfo.size / 1024 <= maxKb) {
+                    log(`[SUCCESS] Target size met.`);
+                    log(`--- END CONVERSION: ${groupName} ---\n`);
+                    sendProgress(groupName, `Готово!`);
+                    return { success: true, ...finalInfo, path: finalOutputPath, finalColorCount: currentColorCount };
+                }
+
+                log(`[RETRY] File too large. Continuing to next optimization step.`);
+                if (fs.existsSync(finalOutputPath)) {
+                    fs.unlinkSync(finalOutputPath); // Удаляем слишком большой файл перед следующей попыткой
+                }
+
+            } catch (err) {
+                log(`[ERROR] Failed at Quality: ${currentQuality}, Colors: ${currentColorCount}. Error: ${err.message}`);
+                console.error(`Ошибка при конвертации группы ${groupName} с качеством ${currentQuality}:`, err);
+                sendProgress(groupName, `Ошибка`);
+                log(`--- FAILED CONVERSION: ${groupName} ---\n`);
+                return { success: false, error: err.message };
+            } finally {
+                // --- ШАГ 5: Очистка ---
+                if (fs.existsSync(tempDirForPngs)) fs.rmSync(tempDirForPngs, { recursive: true, force: true });
+                if (fs.existsSync(tempOutputPath)) fs.unlinkSync(tempOutputPath);
             }
-
-            // --- ШАГ 3: Проверка размера ---
-            const finalInfo = await getGifInfo(finalOutputPath);
-            if (finalInfo.size / 1024 <= maxKb) {
-                console.log(`[SUCCESS] Target size met. Quality: ${currentQuality}, Size: ${(finalInfo.size / 1024).toFixed(1)} KB`);
-                return { success: true, ...finalInfo, path: finalOutputPath, finalColorCount: 256 };
-            }
-
-            console.warn(`[RETRY] File too large (${(finalInfo.size / 1024).toFixed(1)} KB > ${maxKb} KB). Reducing quality from ${currentQuality} and retrying.`);
-            currentQuality -= 10;
-             if (fs.existsSync(finalOutputPath)) {
-                fs.unlinkSync(finalOutputPath); // Удаляем слишком большой файл перед следующей попыткой
-            }
-
-        } catch (err) {
-            console.error(`Ошибка при конвертации группы ${groupName} с качеством ${currentQuality}:`, err);
-            if (fs.existsSync(tempOutputPath)) fs.unlinkSync(tempOutputPath);
-            if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
-            return { success: false, error: err.message };
         }
     }
 
-    console.error(`[FAILURE] Could not meet target size of ${maxKb} KB. Smallest file was too large at quality ${minQuality}.`);
+    log(`[FAILURE] Could not meet target size of ${maxKb} KB.`);
+    log(`--- FAILED CONVERSION: ${groupName} ---\n`);
+    sendProgress(groupName, `Не удалось сжать`);
     return { 
         success: false, 
         error: `Не удалось достичь размера < ${maxKb} КБ. Попробуйте уменьшить разрешение изображений.` 
