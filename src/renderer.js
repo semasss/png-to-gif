@@ -13,8 +13,8 @@ const chooseDirectoryBtn = document.getElementById('choose-directory');
 const convertButton = document.getElementById('convert-button');
 const resetSettingsBtn = document.getElementById('reset-settings');
 const frameDelayInput = document.getElementById('frame-delay');
-const qualitySlider = document.getElementById('quality-slider');
-const qualityValue = document.getElementById('quality-value');
+// const qualitySlider = document.getElementById('quality-slider');
+// const qualityValue = document.getElementById('quality-value');
 const fileList = document.getElementById('file-list');
 const filesContainer = document.getElementById('files-container');
 const progressContainer = document.getElementById('progress-container');
@@ -30,13 +30,21 @@ const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
 const openFolderBtn = document.getElementById('open-folder-button');
+const maxSizeSelect = document.getElementById('max-size');
+const colorCountSelect = document.getElementById('color-count');
+const ditherTypeSelect = document.getElementById('dither-type');
+const groupsInfo = document.getElementById('groups-info');
+const groupsCountSpan = document.getElementById('groups-count');
 
 // Загрузка и применение конфига
 async function loadAndApplyConfig() {
     defaultConfig = await window.electronAPI.getConfig();
     frameDelayInput.value = defaultConfig.frameDelay;
-    qualitySlider.value = defaultConfig.quality;
-    qualityValue.textContent = `${defaultConfig.quality}%`;
+    // qualitySlider.value = defaultConfig.quality;
+    // qualityValue.textContent = `${defaultConfig.quality}%`;
+    if (defaultConfig.colorCount && colorCountSelect) {
+        colorCountSelect.value = defaultConfig.colorCount.toString();
+    }
 }
 
 // Проверка наличия gifski при запуске
@@ -83,8 +91,19 @@ infoModal.addEventListener('click', (e) => {
 // Обработчик сброса настроек
 resetSettingsBtn.addEventListener('click', () => {
     frameDelayInput.value = defaultConfig.frameDelay;
-    qualitySlider.value = defaultConfig.quality;
-    qualityValue.textContent = `${defaultConfig.quality}%`;
+    // qualitySlider.value = defaultConfig.quality;
+    // qualityValue.textContent = `${defaultConfig.quality}%`;
+    if (defaultConfig.colorCount) {
+        colorCountSelect.value = defaultConfig.colorCount.toString();
+    }
+    // Сбрасываем визуальное состояние кнопки выбора папки
+    chooseDirectoryBtn.classList.remove('chosen');
+    chooseDirectoryBtn.innerHTML = 'Выбор папки <span class="arrow">›</span>';
+    directoryDisplay.style.display = 'none';
+    groupsInfo.style.display = 'none';
+    fileList.innerHTML = '';
+    convertButton.disabled = true;
+    selectedDirectory = null;
 });
 
 // Обработчик кнопки "Назад"
@@ -105,10 +124,11 @@ chooseDirectoryBtn.addEventListener('click', async () => {
   const result = await window.electronAPI.chooseDirectory();
   if (result && result.success) {
     selectedDirectory = result.path;
-    directoryDisplay.textContent = selectedDirectory;
-    directoryDisplay.style.display = 'block';
+    // Отображаем имя папки прямо на кнопке
+    const baseFolderName = selectedDirectory.split(/[/\\]/).pop();
     chooseDirectoryBtn.classList.add('chosen');
-    chooseDirectoryBtn.textContent = 'Изменить папку';
+    chooseDirectoryBtn.innerHTML = `${baseFolderName} <span class="arrow">›</span>`;
+    directoryDisplay.style.display = 'none';
     
     try {
       // Получаем список PNG файлов
@@ -133,6 +153,12 @@ function displayFiles(groups) {
   fileList.innerHTML = '';
   filesContainer.style.display = 'block';
   
+  const groupNames = Object.keys(groups);
+  if (groupNames.length > 0) {
+    groupsCountSpan.textContent = groupNames.length.toString();
+    groupsInfo.style.display = 'block';
+  }
+  
   for (const [groupName, files] of Object.entries(groups)) {
     const groupItem = document.createElement('li');
     const displayName = groupName.replace(/_/g, ' ');
@@ -146,7 +172,9 @@ convertButton.addEventListener('click', async () => {
   if (!selectedDirectory) return;
   
   const frameDelaySeconds = parseFloat(frameDelayInput.value);
-  const quality = parseInt(qualitySlider.value);
+  const maxKb = maxSizeSelect ? parseInt(maxSizeSelect.value) : 2048;
+  const colorCount = parseInt(colorCountSelect.value);
+  const ditherType = ditherTypeSelect ? ditherTypeSelect.value : 'floyd';
 
   if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.01) {
     showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.01 сек)', 'error');
@@ -169,7 +197,10 @@ convertButton.addEventListener('click', async () => {
         pngFilePaths: files.map(f => f.path),
         outputDir: selectedDirectory,
         frameDelay: frameDelaySeconds,
-        quality: quality,
+        quality: 90,
+        maxKb: maxKb,
+        colorCount: colorCount,
+        ditherType: ditherType,
       });
       
       if (result.success) {
@@ -199,7 +230,6 @@ convertButton.addEventListener('click', async () => {
   }
   
   convertButton.disabled = false;
-  progressText.textContent = '';
 });
 
 // Отображение результатов
@@ -246,6 +276,6 @@ function showStatus(message, type) {
   }, 5000);
 }
 
-qualitySlider.addEventListener('input', () => {
+/* qualitySlider.addEventListener('input', () => {
     qualityValue.textContent = `${qualitySlider.value}%`;
-});
+}); */

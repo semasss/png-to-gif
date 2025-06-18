@@ -251,7 +251,7 @@ ipcMain.handle('get-config', () => {
 });
 
 // Новая функция конвертации с использованием gifski
-async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality) {
+async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb = 512, colorCount = 256, ditherType = 'floyd') {
     const gifFolder = path.join(outputDir, 'GIF');
     if (!fs.existsSync(gifFolder)) {
         fs.mkdirSync(gifFolder);
@@ -283,29 +283,50 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
         const { width, height } = firstImage;
         log(`Исходное разрешение: ${width}x${height}`);
 
-        const args = [
-            '--fps', fps.toString(),
-            '--quality', quality.toString(),
-            '--width', width.toString(),
-            '--height', height.toString(),
-            '-o', outputPath,
-            ...pngFilePaths // передаем отсортированный список путей
-        ];
+        let currentQuality = quality;
+        let attempt = 1;
+        let finalInfo = null;
+        while (true) {
+            log(`Attempt #${attempt} with quality=${currentQuality}`);
+            const args = [
+                '--fps', fps.toString(),
+                '--quality', currentQuality.toString(),
+                '--width', width.toString(),
+                '--height', height.toString(),
+            ];
 
-        const commandString = `gifski ${args.join(' ')}`;
-        log(`Выполнение команды: ${commandString}`);
+            // dither handling
+            if (ditherType === 'none') {
+                args.push('--lossy-quality', '100', '--motion-quality', '100');
+            }
 
-        const { stdout, stderr } = await runGifski(args);
-        
-        if (stdout) log(`STDOUT:\n${stdout}`);
-        if (stderr) log(`STDERR:\n${stderr}`);
-        
-        const info = await getGifInfo(outputPath);
+            args.push('-o', outputPath);
+            args.push(...pngFilePaths);
 
-        log(`Успех: Конвертация завершена. Размер файла = ${(info.size / 1024).toFixed(1)} KB`);
+            const commandString = `gifski ${args.join(' ')}`;
+            log(`Выполнение команды: ${commandString}`);
+
+            await runGifski(args);
+
+            const info = await getGifInfo(outputPath);
+            finalInfo = info;
+            log(`Размер после попытки #${attempt}: ${(info.size / 1024).toFixed(1)} KB`);
+
+            if (info.size / 1024 <= maxKb || currentQuality <= 30) {
+                if (info.size / 1024 > maxKb) {
+                    log(`Не удалось достичь целевого размера ${maxKb}KB. Останавливаемся на качестве ${currentQuality}.`);
+                }
+                break;
+            }
+
+            currentQuality -= 10;
+            attempt++;
+        }
+
+        log(`Финальная информация: файл ${(finalInfo.size / 1024).toFixed(1)}KB`);
         log('=================================================\n');
 
-        return { ...info, path: outputPath, finalColorCount: 256 }; // gifski всегда использует до 256 цветов
+        return { success: true, ...finalInfo, path: outputPath, finalColorCount: 256 };
     } catch (err) {
         console.error(`Ошибка при конвертации группы ${groupName}:`, err);
         log(`ОШИБКА: ${err.message}`);
@@ -313,6 +334,6 @@ async function convertToGif(groupName, pngFilePaths, outputDir, frameDelay, qual
     }
 }
 
-ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, frameDelay, quality }) => {
-    return await convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality);
+ipcMain.handle('convert-to-gif', async (event, { groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb, colorCount, ditherType }) => {
+    return await convertToGif(groupName, pngFilePaths, outputDir, frameDelay, quality, maxKb, colorCount, ditherType);
 });
