@@ -109,11 +109,11 @@ async function loadAndApplyConfig() {
 async function checkGifskiAvailability() {
     try {
         console.log('[GIFSKI] Проверка доступности gifski...');
-        const isGifskiAvailable = await window.electronAPI.checkImageMagick();
+        const isAvailable = await window.electronAPI.checkTools();
         
-        if (!isGifskiAvailable) {
+        if (!isAvailable) {
             console.warn('[GIFSKI] gifski недоступен');
-            showStatus('Внимание: gifski не найден. Установите его (brew install gifski) и перезапустите приложение.', 'error');
+            showStatus('Внимание: gifski не найден. Установите его (brew install gifski) или поместите в папку vendor и перезапустите приложение.', 'error');
             if (convertButton) {
                 convertButton.disabled = true;
             }
@@ -471,7 +471,7 @@ function displayResults() {
             <div class="result-info">
                 <p><strong>${result.name}</strong></p>
                 <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
-                <p>Размеры: н/д</p> 
+                <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}</p> 
                 ${colorInfo}
             </div>
         `;

@@ -32,9 +32,9 @@ function safeIpcInvoke(channel, ...args) {
 // API объект для экспорта в renderer процесс
 const electronAPI = {
     // Проверка доступности ImageMagick/gifski
-    checkImageMagick: () => {
-        console.log('[PRELOAD] Вызов checkImageMagick');
-        return safeIpcInvoke('check-imagemagick');
+    checkTools: () => {
+        console.log('[PRELOAD] Вызов checkTools');
+        return safeIpcInvoke('check-tools');
     },
     
     // Выбор директории
@@ -68,12 +68,12 @@ const electronAPI = {
     },
     
     // Открытие папки в файловом менеджере
-    openFolder: (path) => {
-        console.log('[PRELOAD] Вызов openFolder с путем:', path);
-        if (!path || typeof path !== 'string') {
+    openFolder: (folderPath) => {
+        console.log('[PRELOAD] Вызов openFolder с путем:', folderPath);
+        if (!folderPath || typeof folderPath !== 'string') {
             return Promise.reject(new Error('Неверный путь к папке'));
         }
-        return safeIpcInvoke('open-folder', path);
+        return safeIpcInvoke('open-folder', folderPath);
     },
     
     // Методы для диагностики

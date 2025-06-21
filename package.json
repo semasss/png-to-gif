@@ -1,10 +1,10 @@
 {
-  "name": "gif-app",
+  "name": "png-to-gif",
   "version": "1.0.0",
-  "description": "PNG в GIF конвертер",
-  "main": "src/main.js",
+  "description": "PNG to GIF converter",
+  "main": "src/main/main.js",
   "scripts": {
-    "start": "electron src/main.js",
+    "start": "electron src/main/main.js",
     "dev": "npm start",
     "build": "electron-builder",
     "build-win": "electron-builder --win",
@@ -26,8 +26,8 @@
     "sharp": "^0.32.6"
   },
   "build": {
-    "appId": "com.gif-app",
-    "productName": "ЖИФ",
+    "appId": "com.png-to-gif-converter",
+    "productName": "PNG to GIF Converter",
     "files": [
       "src/**/*",
       "node_modules/**/*",
@@ -35,11 +35,8 @@
       "!node_modules/**/prebuilds/win32*"
     ],
     "extraResources": [
-      {
-        "from": "vendor/imagemagick",
-        "to": "imagemagick",
-        "filter": ["**/*"]
-      }
+      { "from": "vendor/gifski/gifski", "to": "gifski" },
+      { "from": "vendor/gifsicle/gifsicle", "to": "gifsicle" }
     ],
     "directories": {
       "buildResources": "src/assets"
