@@ -74,6 +74,17 @@ ipcMain.handle('open-folder', (event, folderPath) => {
     shell.openPath(folderPath);
 });
 
+ipcMain.handle('save-log', (event, { logContent, directory }) => {
+    if (!logContent || !directory) return;
+    try {
+        const logPath = path.join(directory, 'session.log');
+        fs.writeFileSync(logPath, logContent, 'utf-8');
+        console.log(`[LOG] Сессионный лог сохранен в: ${logPath}`);
+    } catch (error) {
+        console.error('[LOG] Ошибка сохранения сессионного лога:', error);
+    }
+});
+
 ipcMain.handle('get-config', () => {
     const configPath = path.join(__dirname, 'config.json');
     const defaultConfig = { 

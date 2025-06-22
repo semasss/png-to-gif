@@ -76,6 +76,12 @@ const electronAPI = {
         return safeIpcInvoke('open-folder', folderPath);
     },
     
+    // Сохранение лога
+    saveLog: (logData) => {
+        console.log('[PRELOAD] Вызов saveLog');
+        return safeIpcInvoke('save-log', logData);
+    },
+    
     // Методы для диагностики
     _diagnostics: {
         // Проверка связи с main процессом

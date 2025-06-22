@@ -311,9 +311,13 @@ if (backButton) {
 // Обработчик открытия папки результатов
 if (openFolderBtn) {
     openFolderBtn.addEventListener('click', () => {
-        if (selectedDirectory && window.electronAPI && window.electronAPI.openFolder) {
-            const gifFolder = selectedDirectory + '/GIF';
-            window.electronAPI.openFolder(gifFolder);
+        const firstSuccessfulResult = conversionResults.find(r => r.success && r.outputDir);
+        if (firstSuccessfulResult) {
+            // Открываем корневую папку 'gif_conversions'
+            const rootOutputDir = firstSuccessfulResult.outputDir.split(/[/\\]/).slice(0, -1).join(require('path').sep);
+            window.electronAPI.openPath(rootOutputDir);
+        } else if (selectedDirectory) {
+            window.electronAPI.openPath(selectedDirectory);
         }
     });
 }
@@ -369,7 +373,7 @@ function displayFiles(groups) {
     }
 }
 
-// Конвертация в GIF (упрощенная версия для диагностики)
+// Конвертация в GIF
 if (convertButton) {
     convertButton.addEventListener('click', async () => {
         console.log('[CONVERT] Начало конвертации');
@@ -395,6 +399,7 @@ if (convertButton) {
         let totalGroups = Object.keys(groupedFiles).length;
         let completedGroups = 0;
         conversionResults = [];
+        let sessionLog = [`Сессия конвертации запущена: ${new Date().toISOString()}`];
         
         try {
             for (const [groupName, files] of Object.entries(groupedFiles)) {
@@ -408,23 +413,21 @@ if (convertButton) {
                     const result = await window.electronAPI.convertToGif({
                         groupName: groupName,
                         pngFilePaths: files.map(f => f.path),
-                        outputDir: selectedDirectory,
+                        outputDir: selectedDirectory, // Это будет sourceDir на стороне main
                         frameDelay: frameDelaySeconds,
                         maxKb: maxKb,
                     });
+
+                    // Сохраняем полный результат
+                    conversionResults.push(result);
+                    // Добавляем логи группы в общий лог сессии
+                    if(result.logMessages) {
+                        sessionLog.push(...result.logMessages);
+                    }
                     
                     if (result.success) {
                         completedGroups++;
                         updateProgress(completedGroups, totalGroups);
-                        
-                        conversionResults.push({
-                            path: result.path,
-                            name: groupName,
-                            size: result.size,
-                            dimensions: result.dimensions,
-                            finalColorCount: result.quality || 'N/A',
-                        });
-                        
                         console.log(`[CONVERT] Группа ${groupName} сконвертирована успешно`);
                     } else {
                         console.error(`[CONVERT] Ошибка конвертации группы ${groupName}:`, result.error);
@@ -438,13 +441,23 @@ if (convertButton) {
             
             if (completedGroups === totalGroups && completedGroups > 0) {
                 showStatus(`Успешно сконвертировано ${completedGroups} групп файлов!`, 'success');
-                displayResults();
             } else if (completedGroups > 0) {
                 showStatus(`Сконвертировано ${completedGroups} из ${totalGroups} групп`, 'warning');
-                displayResults();
             } else {
                 showStatus('Не удалось сконвертировать ни одной группы', 'error');
             }
+            displayResults();
+
+            // Сохраняем общий лог в конце сессии
+            const firstSuccess = conversionResults.find(r => r.success);
+            if(firstSuccess && firstSuccess.outputDir) {
+                sessionLog.push(`Сессия конвертации завершена: ${new Date().toISOString()}`);
+                await window.electronAPI.saveLog({
+                    logContent: sessionLog.join('\n'),
+                    directory: firstSuccess.outputDir
+                });
+            }
+
         } catch (error) {
             console.error('[CONVERT] Критическая ошибка конвертации:', error);
             showStatus(`Критическая ошибка конвертации: ${error.message}`, 'error');
@@ -467,17 +480,34 @@ function displayResults() {
         const card = document.createElement('div');
         card.className = 'result-card';
         
-        const colorInfo = `<p>Качество: ${result.finalColorCount}</p>`;
-        
-        card.innerHTML = `
-            <img src="file://${result.path}" alt="${result.name}">
-            <div class="result-info">
-                <p><strong>${result.name}</strong></p>
-                <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
-                <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}</p> 
-                ${colorInfo}
-            </div>
-        `;
+        if (result.success) {
+            card.innerHTML = `
+                <img src="file://${result.path}?t=${new Date().getTime()}" alt="${result.groupName}">
+                <div class="result-info">
+                    <p><strong>${result.groupName}</strong></p>
+                    <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
+                    <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}</p> 
+                    <p>Качество: ${result.quality || 'N/A'}</p>
+                </div>
+                <div class="result-actions">
+                    <button class="action-btn show-in-folder-btn">Показать в проводнике</button>
+                </div>
+            `;
+
+            card.querySelector('.show-in-folder-btn').addEventListener('click', () => {
+                window.electronAPI.showItemInFolder(result.path);
+            });
+
+        } else {
+            card.classList.add('error');
+            card.innerHTML = `
+                <div class="result-info">
+                    <p><strong>${result.groupName}</strong></p>
+                    <p class="error-message">Ошибка: ${result.error || 'Неизвестная ошибка'}</p>
+                </div>
+            `;
+        }
+
         resultsGrid.appendChild(card);
     });
     
@@ -508,7 +538,12 @@ console.log('[RENDERER] Скрипт renderer.js загружен полност
 // Обработчик открытия папки с результатами
 if (openOutputFolderBtn) {
     openOutputFolderBtn.addEventListener('click', () => {
-        if (selectedDirectory) {
+        const firstSuccessfulResult = conversionResults.find(r => r.success && r.outputDir);
+        if (firstSuccessfulResult) {
+            // outputDir теперь указывает на общую папку 'gif_conversions'
+            window.electronAPI.openPath(firstSuccessfulResult.outputDir);
+        } else if (selectedDirectory) {
+            // Фоллбэк, если ничего не сконвертировано
             window.electronAPI.openPath(selectedDirectory);
         }
     });
