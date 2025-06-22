@@ -123,6 +123,10 @@ ipcMain.handle('save-log', (event, { logContent, directory }) => {
     }
     
     try {
+        // Убедимся, что директория для отчета существует.
+        // { recursive: true } создаст все необходимые родительские директории.
+        fs.mkdirSync(directory, { recursive: true });
+
         // Создаем красивое имя файла с временной меткой
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const logPath = path.join(directory, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);

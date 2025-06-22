@@ -5,92 +5,51 @@ const { app } = require('electron');
 const isDev = require('electron-is-dev');
 const { Image } = require('image-js');
 
-// ВАЖНО: Укажите ваш API-ключ здесь. Его можно получить на https://tinypng.com/developers
-const TINYPNG_API_KEY = 'YOUR_API_KEY_HERE';
-
-// ================================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УЛУЧШЕННОЙ ОТЧЕТНОСТИ
-// ================================================================================
-
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Б';
-    const k = 1024;
-    const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
 // ================================================================================
 // ОСНОВНЫЕ ФУНКЦИИ СЕРВИСА
 // ================================================================================
 
 /**
- * Принудительно сжимает массив изображений с помощью tiny-compressor.
- * @param {string[]} filePaths - Массив путей к файлам.
- * @param {(message: string) => void} log - Функция для логирования.
- */
-async function compressImages(filePaths, log) {
-    if (TINYPNG_API_KEY === 'YOUR_API_KEY_HERE' || !TINYPNG_API_KEY) {
-        log('[ПРЕДУПРЕЖДЕНИЕ] API-ключ для tiny-compressor не установлен. Сжатие пропущено.');
-        return;
-    }
-
-    log(`[СЖАТИЕ] Начало принудительного сжатия ${filePaths.length} исходных файлов...`);
-    try {
-        const { default: tiny } = await import('tiny-compressor');
-        tiny.key = TINYPNG_API_KEY;
-
-        const compressionPromises = filePaths.map(async (filePath) => {
-            try {
-                const source = tiny.fromFile(filePath);
-                await source.toFile(filePath); // Перезаписываем исходный файл
-                log(`  - Успешно сжат: ${path.basename(filePath)}`);
-            } catch (compressError) {
-                log(`  - Ошибка сжатия файла ${path.basename(filePath)}: ${compressError.message}`);
-            }
-        });
-
-        await Promise.all(compressionPromises);
-        log(`[СЖАТИЕ] Сжатие исходных файлов завершено.`);
-    } catch (e) {
-        log(`[ОШИБКА] Критическая ошибка во время инициализации tiny-compressor: ${e.message}`);
-    }
-}
-
-/**
  * Находит путь к исполняемому файлу инструмента (gifski, gifsicle).
- * @param {string} toolName - Имя инструмента.
+ * Проверяет несколько возможных имен.
+ * @param {string|string[]} toolNames - Имя или массив имен инструмента.
  * @returns {string|null} Путь к файлу или null, если не найден.
  */
-function getToolPath(toolName) {
-    if (isDev) {
-        try {
-            const systemPath = execSync(`which ${toolName}`, { encoding: 'utf-8' }).trim();
-            if (systemPath && fs.existsSync(systemPath)) {
-                console.log(`[${toolName.toUpperCase()}_PATH] Используется системный ${toolName} из PATH: ${systemPath}`);
-                return systemPath;
+function getToolPath(toolNames) {
+    if (!Array.isArray(toolNames)) {
+        toolNames = [toolNames];
+    }
+
+    for (const toolName of toolNames) {
+        if (isDev) {
+            try {
+                const systemPath = execSync(`which ${toolName}`, { encoding: 'utf-8' }).trim();
+                if (systemPath && fs.existsSync(systemPath)) {
+                    console.log(`[${toolName.toUpperCase()}_PATH] Используется системный ${toolName} из PATH: ${systemPath}`);
+                    return systemPath;
+                }
+            } catch (error) {
+                // Игнорируем ошибку, если в PATH нет, ищем локально
             }
-        } catch (error) {
-            console.log(`[${toolName.toUpperCase()}_PATH] Системный ${toolName} не найден, ищем локальный...`);
+        }
+
+        const localPath = isDev 
+            ? path.join(app.getAppPath(), 'vendor', toolName, toolName)
+            : path.join(process.resourcesPath, toolName);
+
+        if (fs.existsSync(localPath)) {
+            console.log(`[${toolName.toUpperCase()}_PATH] Используется локальный ${toolName}: ${localPath}`);
+            try {
+                fs.accessSync(localPath, fs.constants.X_OK);
+            } catch (err) {
+                console.log(`[${toolName.toUpperCase()}_PATH] Устанавливаю права на выполнение...`);
+                fs.chmodSync(localPath, 0o755);
+            }
+            return localPath;
         }
     }
-
-    const localPath = isDev 
-        ? path.join(app.getAppPath(), 'vendor', toolName, toolName)
-        : path.join(process.resourcesPath, toolName);
-
-    if (fs.existsSync(localPath)) {
-        console.log(`[${toolName.toUpperCase()}_PATH] Используется локальный ${toolName}: ${localPath}`);
-        try {
-            fs.accessSync(localPath, fs.constants.X_OK);
-        } catch (err) {
-            console.log(`[${toolName.toUpperCase()}_PATH] Устанавливаю права на выполнение...`);
-            fs.chmodSync(localPath, 0o755);
-        }
-        return localPath;
-    }
-
-    console.warn(`[${toolName.toUpperCase()}_PATH] ${toolName} не найден.`);
+    
+    console.warn(`[TOOL_PATH] Инструменты не найдены: ${toolNames.join(', ')}`);
     return null;
 }
 
@@ -125,17 +84,14 @@ function runCommand(toolName, binaryPath, args) {
 }
 
 /**
- * Проверяет доступность gifski.
+ * Проверяет доступность gifski и gifsicle/giflossy.
  * @returns {Promise<boolean>}
  */
 async function checkTools() {
     const gifskiPath = getToolPath('gifski');
-    if (!gifskiPath) return false;
-
-    // Опционально проверяем gifsicle
-    getToolPath('gifsicle');
-
-    return true;
+    const optimizerPath = getToolPath(['giflossy', 'gifsicle']);
+    
+    return !!gifskiPath && !!optimizerPath;
 }
 
 /**
@@ -199,9 +155,45 @@ function getPngFiles(directory) {
     }
 }
 
+/**
+ * Выполняет бинарный поиск по массиву дискретных значений.
+ * @param {number[]} values - Отсортированный массив значений для поиска.
+ * @param {(value: number) => Promise<boolean>} testFn - Асинхронная функция, возвращающая true, если значение подходит.
+ * @param {boolean} findHighest - true для поиска максимального подходящего значения, false для минимального.
+ * @returns {Promise<number|null>} Найденное значение или null.
+ */
+async function binarySearchDiscrete(values, testFn, findHighest = true) {
+    let low = 0;
+    let high = values.length - 1;
+    let bestVal = null;
+    const sortedValues = [...values].sort((a, b) => a - b);
+
+    while (low <= high) {
+        const midIndex = Math.floor((low + high) / 2);
+        const midValue = sortedValues[midIndex];
+        
+        const isSuccess = await testFn(midValue);
+
+        if (isSuccess) {
+            bestVal = midValue;
+            if (findHighest) {
+                low = midIndex + 1; // Ищем большее значение
+            } else {
+                high = midIndex - 1; // Ищем меньшее значение
+            }
+        } else {
+            if (findHighest) {
+                high = midIndex - 1;
+            } else {
+                low = midIndex + 1;
+            }
+        }
+    }
+    return bestVal;
+}
 
 /**
- * Конвертирует последовательность PNG в GIF.
+ * Конвертирует последовательность PNG в GIF с использованием умной стратегии.
  * @param {string} groupName - Имя группы (для выходного файла).
  * @param {{name: string, path: string}[]} pngFilePaths - Массив объектов файлов изображений.
  * @param {string} outputDir - Директория для сохранения GIF.
@@ -209,114 +201,147 @@ function getPngFiles(directory) {
  * @returns {Promise<object>} Результат конвертации.
  */
 async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
-    // Деструктуризация настроек с значениями по умолчанию.
-    // frameDelay: задержка между кадрами в секундах.
-    // maxKb: максимальный желаемый размер файла в килобайтах.
     const { frameDelay = 3, maxKb = 500 } = settings;
-    // Формируем полный путь для итогового GIF-файла.
+    const maxBytes = maxKb * 1024;
     const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
+    const log = (message) => console.log(`[${groupName}] ${message}`);
 
-    // Утилиты командной строки и image-js ожидают массив путей, а не объектов.
-    const imagePaths = pngFilePaths.map(file => file.path);
+    const cleanupFiles = (...files) => {
+        files.forEach(file => {
+            if (file && fs.existsSync(file)) fs.unlinkSync(file);
+        });
+    };
 
-    // Получаем пути к необходимым утилитам.
-    // Это позволяет абстрагироваться от их точного местоположения в системе.
-    const gifskiPath = getToolPath('gifski');
-    const gifsiclePath = getToolPath('gifsicle');
+    try {
+        log('Шаг 1/5: Нормализация размеров кадров...');
+        const imagePaths = pngFilePaths.map(f => f.path);
+        const baseImage = await Image.load(imagePaths[0]);
+        const { width, height } = baseImage;
 
-    // Проверяем, что обе утилиты доступны. Без них конвертация невозможна.
-    if (!gifskiPath || !gifsiclePath) {
-        const missing = [!gifskiPath && 'gifski', !gifsiclePath && 'gifsicle'].filter(Boolean).join(', ');
-        return { success: false, error: `Критически важные утилиты не найдены: ${missing}.`, groupName };
-    }
-
-    // Загружаем первое изображение, чтобы определить размеры (ширину и высоту) для всего GIF.
-    // Это гарантирует, что все кадры будут иметь одинаковый размер.
-    const firstImage = await Image.load(imagePaths[0]);
-    const { width, height } = firstImage;
-    
-    // Конвертируем задержку из секунд в сотые доли секунды, как того требует gifsicle.
-    // Например, 3 секунды становятся 300. Минимальное значение - 2.
-    const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
-    
-    // Определяем массив уровней качества для итеративной попытки сжатия.
-    // Начинаем с наилучшего качества (100) и постепенно его снижаем,
-    // чтобы найти оптимальное соотношение качества и размера файла.
-    const qualityLevels = [100, 95, 90, 85, 80, 75, 70, 65, 60, 50, 40, 30];
-
-    // Цикл по уровням качества. Основная логика для достижения нужного размера файла.
-    for (const quality of qualityLevels) {
-        // Создаем временный файл для промежуточного результата от gifski.
-        // Это нужно, чтобы передать его на обработку в gifsicle.
-        const gifskiTempOutput = path.join(outputDir, `${groupName}_temp_gifski.gif`);
-        
-        // Аргументы для вызова gifski.
-        // gifski используется для создания высококачественного GIF из набора PNG-кадров.
-        const gifskiArgs = [
-            '--fps', '60', // Используем высокий FPS для плавной сборки кадров. Реальная скорость анимации будет задана в gifsicle.
-            '--quality', quality, // Текущий уровень качества из цикла.
-            '--width', width, // Ширина из первого изображения.
-            '--height', height, // Высота из первого изображения.
-            '-o', gifskiTempOutput, // Путь к временному выходному файлу.
-            ...imagePaths // Все пути к PNG-файлам.
-        ];
-
-        try {
-            // Этап 1: Создание GIF с помощью gifski.
-            // На этом этапе мы получаем GIF с заданным качеством, но без правильной задержки анимации.
-            console.log(`[GIFSKI] Этап 1: Сборка кадров с качеством ${quality}...`);
-            await runCommand('gifski', gifskiPath, gifskiArgs);
-
-            // Этап 2: Оптимизация и установка задержки с помощью gifsicle.
-            // gifsicle берет созданный gifski файл и применяет к нему нужную задержку и дополнительное сжатие.
-            console.log(`[GIFSICLE] Этап 2: Установка задержки (${frameDelay}s) и оптимизация...`);
-            const gifsicleArgs = [
-                '--delay', gifsicleDelay, // Устанавливаем правильную задержку между кадрами.
-                '-O3', // Максимальный уровень оптимизации.
-                '--output', finalOutputPath, // Итоговый файл.
-                gifskiTempOutput, // Входной файл (результат работы gifski).
-            ];
-            await runCommand('gifsicle', gifsiclePath, gifsicleArgs);
-
-            // После успешной обработки в gifsicle временный файл от gifski больше не нужен.
-            fs.unlinkSync(gifskiTempOutput);
-            
-            // Получаем статистику по созданному файлу, в первую очередь нас интересует его размер.
-            const stats = fs.statSync(finalOutputPath);
-            console.log(`[RESULT] Качество: ${quality}, Задержка: ${frameDelay}s, Размер: ${(stats.size / 1024).toFixed(1)} KB`);
-
-            // Проверяем, укладывается ли размер файла в заданный лимит.
-            if (stats.size <= maxKb * 1024) {
-                // Если да, то мы достигли цели. Возвращаем успешный результат.
-                console.log(`[SUCCESS] Успех! Файл в пределах лимита.`);
-                return { 
-                    success: true, 
-                    path: finalOutputPath, 
-                    groupName,
-                    size: stats.size,
-                    dimensions: { width, height },
-                    quality: quality
-                };
-            } else {
-                 // Если файл все еще слишком большой, сообщаем об этом, удаляем его
-                 // и переходим к следующей итерации цикла с более низким качеством.
-                 console.log(`[INFO] Файл слишком большой (${(stats.size / 1024).toFixed(1)} KB), пробую качество ниже.`);
-                 fs.unlinkSync(finalOutputPath);
+        for (let i = 1; i < imagePaths.length; i++) {
+            const img = await Image.load(imagePaths[i]);
+            if (img.width !== width || img.height !== height) {
+                log(`  - Коррекция размера кадра ${path.basename(imagePaths[i])}: ${img.width}x${img.height} -> ${width}x${height}`);
+                const resizedImg = img.resize({ width, height });
+                await resizedImg.save(imagePaths[i]);
             }
-
-        } catch (error) {
-            // Обработка ошибок, которые могли произойти во время вызова gifski или gifsicle.
-            console.error(`Ошибка конвертации для группы ${groupName} с качеством ${quality}:`, error);
-            // Подчищаем временные файлы, если они остались после сбоя.
-            if (fs.existsSync(gifskiTempOutput)) fs.unlinkSync(gifskiTempOutput);
-            if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
         }
-    }
 
-    // Если цикл завершился, а подходящий файл так и не был создан,
-    // значит, нам не удалось сжать GIF до нужного размера даже с самым низким качеством.
-    console.error(`[FAILURE] Не удалось сжать файл ${groupName} до ${maxKb} KB`);
-    return { success: false, error: `Не удалось сжать файл до ${maxKb} KB`, groupName };
+        const targetBpp = maxBytes / (width * height * imagePaths.length);
+        log(`Целевой "бюджет": ${targetBpp.toFixed(3)} байт/пиксель.`);
+        if (targetBpp < 0.05) {
+            log('[ПРЕДУПРЕЖДЕНИЕ] Бюджет крайне мал. Может потребоваться значительное сжатие или уменьшение разрешения.');
+        }
+
+        const gifskiPath = getToolPath('gifski');
+        const optimizerPath = getToolPath(['giflossy', 'gifsicle']);
+
+        if (!gifskiPath || !optimizerPath) {
+            throw new Error('Ключевые утилиты (gifski, gifsicle/giflossy) не найдены.');
+        }
+
+        log('Шаг 2/5: Создание "золотого" GIF (качество 100%)...');
+        const rawGifPath = path.join(outputDir, `${groupName}_raw.gif`);
+        await runCommand('gifski', gifskiPath, [
+            '--fps', '60',
+            '--quality', '100',
+            '--width', width,
+            '--height', height,
+            '-o', rawGifPath,
+            ...imagePaths
+        ]);
+
+        const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
+        let optimizedPath = path.join(outputDir, `${groupName}_optimized.gif`);
+        
+        const testSize = async (filePath) => {
+            const stats = fs.statSync(filePath);
+            const isOk = stats.size <= maxBytes;
+            log(`  -> ${isOk ? '✔' : '✖'} ${(stats.size / 1024).toFixed(0)} KB / ${maxKb} KB`);
+            return isOk;
+        };
+        
+        // --- Фаза A: Бинарный поиск по палитре ---
+        log('Шаг 3/5: Поиск оптимальной палитры (gifsicle --colors)...');
+        const colorLevels = [32, 48, 64, 96, 128, 256];
+        let bestColors = await binarySearchDiscrete(colorLevels, async (numColors) => {
+            log(`  - Пробуем colors=${numColors}...`);
+            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', numColors, rawGifPath, '--output', optimizedPath]);
+            return await testSize(optimizedPath);
+        }, true);
+
+        if (bestColors) {
+            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', bestColors, '--delay', gifsicleDelay, rawGifPath, '--output', finalOutputPath]);
+            if (await testSize(finalOutputPath)) {
+                log('Успех! Уложились в лимит размером палитры.');
+                cleanupFiles(rawGifPath, optimizedPath);
+                const finalStats = fs.statSync(finalOutputPath);
+                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors}` };
+            }
+        }
+        
+        // --- Фаза B: Бинарный поиск по потерям ---
+        log('Шаг 4/5: Поиск оптимального сжатия с потерями (gifsicle --lossy)...');
+        const lossyLevels = Array.from({length: 18}, (_, i) => 20 + i * 10); // [20, 30... 190, 200]
+        const colorsArg = bestColors ? ['--colors', bestColors] : [];
+
+        let bestLossy = await binarySearchDiscrete(lossyLevels, async (lossy) => {
+            log(`  - Пробуем lossy=${lossy}...`);
+            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${lossy}`, rawGifPath, '--output', optimizedPath]);
+            return await testSize(optimizedPath);
+        }, false); // Ищем минимальное подходящее значение
+
+        if (bestLossy) {
+            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${bestLossy}`, '--delay', gifsicleDelay, rawGifPath, '--output', finalOutputPath]);
+             if (await testSize(finalOutputPath)) {
+                log('Успех! Уложились в лимит с lossy-сжатием.');
+                cleanupFiles(rawGifPath, optimizedPath);
+                const finalStats = fs.statSync(finalOutputPath);
+                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors||256}, lossy=${bestLossy}` };
+            }
+        }
+        
+        // --- Фаза C: Масштабирование как крайняя мера ---
+        log('Шаг 5/5: Не удалось уложиться. Пробуем уменьшить разрешение...');
+        const currentStats = fs.statSync(bestLossy ? finalOutputPath : rawGifPath);
+        const scaleFactor = Math.sqrt(maxBytes / currentStats.size);
+
+        if (scaleFactor < 0.95) {
+            const newWidth = Math.floor(width * scaleFactor);
+            log(`  - Уменьшаем до ${newWidth}px по ширине (k=${scaleFactor.toFixed(2)})...`);
+            const finalArgs = [
+                '-O3',
+                '--dither',
+                ...colorsArg,
+                bestLossy ? `--lossy=${bestLossy}` : '',
+                '--delay', gifsicleDelay,
+                '--scale', `${scaleFactor.toFixed(3)}`,
+                rawGifPath,
+                '--output', finalOutputPath
+            ].filter(Boolean);
+
+            await runCommand('gifsicle', optimizerPath, finalArgs);
+
+            if (await testSize(finalOutputPath)) {
+                 log('Успех! Уложились в лимит после уменьшения разрешения.');
+                cleanupFiles(rawGifPath, optimizedPath);
+                const finalStats = fs.statSync(finalOutputPath);
+                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: Math.floor(height*scaleFactor) }, quality: `scaled` };
+            }
+        }
+
+        cleanupFiles(rawGifPath, optimizedPath, finalOutputPath);
+        throw new Error(`Не удалось сжать файл до ${maxKb} KB даже с максимальными настройками.`);
+
+    } catch (error) {
+        log(`[КРИТИЧЕСКАЯ ОШИБКА] ${error.message}`);
+        cleanupFiles(
+            path.join(outputDir, `${groupName}_raw.gif`),
+            path.join(outputDir, `${groupName}_optimized.gif`),
+            finalOutputPath
+        );
+        return { success: false, error: error.message, groupName };
+    }
 }
 
 module.exports = {
