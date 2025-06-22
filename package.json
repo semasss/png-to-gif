@@ -23,7 +23,8 @@
     "image-js": "^0.35.3",
     "png-file-stream": "^1.2.1",
     "png-js": "^1.0.0",
-    "sharp": "^0.32.6"
+    "sharp": "^0.32.6",
+    "tiny-compressor": "^1.0.3"
   },
   "build": {
     "appId": "com.png-to-gif-converter",
@@ -35,8 +36,14 @@
       "!node_modules/**/prebuilds/win32*"
     ],
     "extraResources": [
-      { "from": "vendor/gifski/gifski", "to": "gifski" },
-      { "from": "vendor/gifsicle/gifsicle", "to": "gifsicle" }
+      {
+        "from": "vendor/gifski/gifski",
+        "to": "gifski"
+      },
+      {
+        "from": "vendor/gifsicle/gifsicle",
+        "to": "gifsicle"
+      }
     ],
     "directories": {
       "buildResources": "src/assets"
@@ -46,7 +53,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "hardenedRuntime": true,

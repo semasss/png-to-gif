@@ -65,9 +65,13 @@ ipcMain.handle('get-png-files', async (event, directory) => {
     return conversionService.getPngFiles(directory);
 });
 
+ipcMain.handle('path-join', async (event, ...args) => {
+    return path.join(...args);
+});
+
 ipcMain.handle('convert-to-gif', async (event, args) => {
-    const { groupName, pngFilePaths, outputDir, ...settings } = args;
-    return await conversionService.convertToGif(groupName, pngFilePaths, outputDir, settings);
+    const { groupName, files, outputDir, ...settings } = args;
+    return await conversionService.convertToGif(groupName, files, outputDir, settings);
 });
 
 ipcMain.handle('open-folder', (event, folderPath) => {
@@ -77,7 +81,7 @@ ipcMain.handle('open-folder', (event, folderPath) => {
 ipcMain.handle('save-log', (event, { logContent, directory }) => {
     if (!logContent || !directory) return;
     try {
-        const logPath = path.join(directory, 'session.log');
+        const logPath = path.join(directory, 'conversion_log.txt');
         fs.writeFileSync(logPath, logContent, 'utf-8');
         console.log(`[LOG] Сессионный лог сохранен в: ${logPath}`);
     } catch (error) {

@@ -52,6 +52,11 @@ const electronAPI = {
         return safeIpcInvoke('get-png-files', directoryPath);
     },
     
+    // Соединение путей
+    pathJoin: (...args) => {
+        return safeIpcInvoke('path-join', ...args);
+    },
+    
     // Конвертация в GIF
     convertToGif: (options) => {
         console.log('[PRELOAD] Вызов convertToGif с опциями:', options);

@@ -310,12 +310,11 @@ if (backButton) {
 
 // Обработчик открытия папки результатов
 if (openFolderBtn) {
-    openFolderBtn.addEventListener('click', () => {
+    openFolderBtn.addEventListener('click', async () => {
         const firstSuccessfulResult = conversionResults.find(r => r.success && r.outputDir);
         if (firstSuccessfulResult) {
             // Открываем корневую папку 'gif_conversions'
-            const rootOutputDir = firstSuccessfulResult.outputDir.split(/[/\\]/).slice(0, -1).join(require('path').sep);
-            window.electronAPI.openPath(rootOutputDir);
+            window.electronAPI.openPath(firstSuccessfulResult.outputDir);
         } else if (selectedDirectory) {
             window.electronAPI.openPath(selectedDirectory);
         }
@@ -401,6 +400,9 @@ if (convertButton) {
         conversionResults = [];
         let sessionLog = [`Сессия конвертации запущена: ${new Date().toISOString()}`];
         
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const sessionOutputDir = await window.electronAPI.pathJoin(selectedDirectory, `Результаты конвертации - ${timestamp}`);
+        
         try {
             for (const [groupName, files] of Object.entries(groupedFiles)) {
                 console.log(`[CONVERT] Конвертация группы: ${groupName}`);
@@ -412,10 +414,11 @@ if (convertButton) {
                 try {
                     const result = await window.electronAPI.convertToGif({
                         groupName: groupName,
-                        pngFilePaths: files.map(f => f.path),
-                        outputDir: selectedDirectory, // Это будет sourceDir на стороне main
+                        files: files,
+                        outputDir: selectedDirectory,
                         frameDelay: frameDelaySeconds,
                         maxKb: maxKb,
+                        sessionOutputDir: sessionOutputDir,
                     });
 
                     // Сохраняем полный результат
@@ -449,12 +452,11 @@ if (convertButton) {
             displayResults();
 
             // Сохраняем общий лог в конце сессии
-            const firstSuccess = conversionResults.find(r => r.success);
-            if(firstSuccess && firstSuccess.outputDir) {
-                sessionLog.push(`Сессия конвертации завершена: ${new Date().toISOString()}`);
+            if(sessionOutputDir && completedGroups > 0) {
+                sessionLog.push(`\nСессия конвертации завершена: ${new Date().toISOString()}`);
                 await window.electronAPI.saveLog({
                     logContent: sessionLog.join('\n'),
-                    directory: firstSuccess.outputDir
+                    directory: sessionOutputDir
                 });
             }
 
