@@ -152,57 +152,82 @@ function getPngFiles(directory) {
  * @returns {Promise<object>} Результат конвертации.
  */
 async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
-    // Пользователь хочет задержку в 3 секунды по умолчанию
+    // Деструктуризация настроек с значениями по умолчанию.
+    // frameDelay: задержка между кадрами в секундах.
+    // maxKb: максимальный желаемый размер файла в килобайтах.
     const { frameDelay = 3, maxKb = 500 } = settings;
+    // Формируем полный путь для итогового GIF-файла.
     const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
 
+    // Получаем пути к необходимым утилитам.
+    // Это позволяет абстрагироваться от их точного местоположения в системе.
     const gifskiPath = getToolPath('gifski');
     const gifsiclePath = getToolPath('gifsicle');
 
+    // Проверяем, что обе утилиты доступны. Без них конвертация невозможна.
     if (!gifskiPath || !gifsiclePath) {
         const missing = [!gifskiPath && 'gifski', !gifsiclePath && 'gifsicle'].filter(Boolean).join(', ');
         return { success: false, error: `Критически важные утилиты не найдены: ${missing}.`, groupName };
     }
 
+    // Загружаем первое изображение, чтобы определить размеры (ширину и высоту) для всего GIF.
+    // Это гарантирует, что все кадры будут иметь одинаковый размер.
     const firstImage = await Image.load(pngFilePaths[0]);
     const { width, height } = firstImage;
     
-    // gifsicle использует задержку в сотых долях секунды. 3 секунды = 300.
+    // Конвертируем задержку из секунд в сотые доли секунды, как того требует gifsicle.
+    // Например, 3 секунды становятся 300. Минимальное значение - 2.
     const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
     
+    // Определяем массив уровней качества для итеративной попытки сжатия.
+    // Начинаем с наилучшего качества (100) и постепенно его снижаем,
+    // чтобы найти оптимальное соотношение качества и размера файла.
     const qualityLevels = [100, 95, 90, 85, 80, 75, 70, 65, 60, 50, 40, 30];
 
+    // Цикл по уровням качества. Основная логика для достижения нужного размера файла.
     for (const quality of qualityLevels) {
+        // Создаем временный файл для промежуточного результата от gifski.
+        // Это нужно, чтобы передать его на обработку в gifsicle.
         const gifskiTempOutput = path.join(outputDir, `${groupName}_temp_gifski.gif`);
         
+        // Аргументы для вызова gifski.
+        // gifski используется для создания высококачественного GIF из набора PNG-кадров.
         const gifskiArgs = [
-            '--fps', '60', // Используем фиксированный высокий FPS для сборки кадров
-            '--quality', quality,
-            '--width', width,
-            '--height', height,
-            '-o', gifskiTempOutput,
-            ...pngFilePaths
+            '--fps', '60', // Используем высокий FPS для плавной сборки кадров. Реальная скорость анимации будет задана в gifsicle.
+            '--quality', quality, // Текущий уровень качества из цикла.
+            '--width', width, // Ширина из первого изображения.
+            '--height', height, // Высота из первого изображения.
+            '-o', gifskiTempOutput, // Путь к временному выходному файлу.
+            ...pngFilePaths // Все пути к PNG-файлам.
         ];
 
         try {
+            // Этап 1: Создание GIF с помощью gifski.
+            // На этом этапе мы получаем GIF с заданным качеством, но без правильной задержки анимации.
             console.log(`[GIFSKI] Этап 1: Сборка кадров с качеством ${quality}...`);
             await runCommand('gifski', gifskiPath, gifskiArgs);
 
+            // Этап 2: Оптимизация и установка задержки с помощью gifsicle.
+            // gifsicle берет созданный gifski файл и применяет к нему нужную задержку и дополнительное сжатие.
             console.log(`[GIFSICLE] Этап 2: Установка задержки (${frameDelay}s) и оптимизация...`);
             const gifsicleArgs = [
-                '--delay', gifsicleDelay,
-                '-O3',
-                '--output', finalOutputPath,
-                gifskiTempOutput,
+                '--delay', gifsicleDelay, // Устанавливаем правильную задержку между кадрами.
+                '-O3', // Максимальный уровень оптимизации.
+                '--output', finalOutputPath, // Итоговый файл.
+                gifskiTempOutput, // Входной файл (результат работы gifski).
             ];
             await runCommand('gifsicle', gifsiclePath, gifsicleArgs);
 
+            // После успешной обработки в gifsicle временный файл от gifski больше не нужен.
             fs.unlinkSync(gifskiTempOutput);
             
+            // Получаем статистику по созданному файлу, в первую очередь нас интересует его размер.
             const stats = fs.statSync(finalOutputPath);
             console.log(`[RESULT] Качество: ${quality}, Задержка: ${frameDelay}s, Размер: ${(stats.size / 1024).toFixed(1)} KB`);
 
+            // Проверяем, укладывается ли размер файла в заданный лимит.
             if (stats.size <= maxKb * 1024) {
+                // Если да, то мы достигли цели. Возвращаем успешный результат.
                 console.log(`[SUCCESS] Успех! Файл в пределах лимита.`);
                 return { 
                     success: true, 
@@ -213,17 +238,23 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
                     quality: quality
                 };
             } else {
+                 // Если файл все еще слишком большой, сообщаем об этом, удаляем его
+                 // и переходим к следующей итерации цикла с более низким качеством.
                  console.log(`[INFO] Файл слишком большой (${(stats.size / 1024).toFixed(1)} KB), пробую качество ниже.`);
                  fs.unlinkSync(finalOutputPath);
             }
 
         } catch (error) {
+            // Обработка ошибок, которые могли произойти во время вызова gifski или gifsicle.
             console.error(`Ошибка конвертации для группы ${groupName} с качеством ${quality}:`, error);
+            // Подчищаем временные файлы, если они остались после сбоя.
             if (fs.existsSync(gifskiTempOutput)) fs.unlinkSync(gifskiTempOutput);
             if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
         }
     }
 
+    // Если цикл завершился, а подходящий файл так и не был создан,
+    // значит, нам не удалось сжать GIF до нужного размера даже с самым низким качеством.
     console.error(`[FAILURE] Не удалось сжать файл ${groupName} до ${maxKb} KB`);
     return { success: false, error: `Не удалось сжать файл до ${maxKb} KB`, groupName };
 }
