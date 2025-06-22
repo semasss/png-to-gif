@@ -148,60 +148,84 @@ function getPngFiles(directory) {
  * @param {string} groupName - Имя группы (для выходного файла).
  * @param {string[]} pngFilePaths - Массив путей к PNG-файлам.
  * @param {string} outputDir - Директория для сохранения GIF.
- * @param {object} settings - Настройки конвертации.
+ * @param {object} settings - Настройки конвертации { frameDelay, maxKb }.
  * @returns {Promise<object>} Результат конвертации.
  */
 async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
-    const { frameDelay, quality } = settings;
-    const tempOutputPath = path.join(outputDir, `${groupName}_temp.gif`);
+    // Пользователь хочет задержку в 3 секунды по умолчанию
+    const { frameDelay = 3, maxKb = 500 } = settings;
     const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
 
     const gifskiPath = getToolPath('gifski');
-    if (!gifskiPath) {
-        return { success: false, error: 'Утилита gifski не найдена.', groupName };
-    }
+    const gifsiclePath = getToolPath('gifsicle');
 
-    const fps = Math.round(100 / (frameDelay || 3));
+    if (!gifskiPath || !gifsiclePath) {
+        const missing = [!gifskiPath && 'gifski', !gifsiclePath && 'gifsicle'].filter(Boolean).join(', ');
+        return { success: false, error: `Критически важные утилиты не найдены: ${missing}.`, groupName };
+    }
 
     const firstImage = await Image.load(pngFilePaths[0]);
     const { width, height } = firstImage;
+    
+    // gifsicle использует задержку в сотых долях секунды. 3 секунды = 300.
+    const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
+    
+    const qualityLevels = [100, 95, 90, 85, 80, 75, 70, 65, 60, 50, 40, 30];
 
-    const gifskiArgs = [
-        '--fps', fps,
-        '--quality', quality || 90,
-        '--width', width,
-        '--height', height,
-        '-o', tempOutputPath,
-        ...pngFilePaths
-    ];
-
-    try {
-        console.log(`[GIFSKI] Создание GIF...`);
-        await runCommand('gifski', gifskiPath, gifskiArgs);
-
-        const gifsiclePath = getToolPath('gifsicle');
-        if (gifsiclePath) {
-            console.log(`[GIFSICLE] Оптимизация GIF...`);
-            await runCommand('gifsicle', gifsiclePath, ['-O3', tempOutputPath, '-o', finalOutputPath]);
-            fs.unlinkSync(tempOutputPath);
-        } else {
-            fs.renameSync(tempOutputPath, finalOutputPath);
-        }
+    for (const quality of qualityLevels) {
+        const gifskiTempOutput = path.join(outputDir, `${groupName}_temp_gifski.gif`);
         
-        const stats = fs.statSync(finalOutputPath);
-        console.log(`GIF создан: ${finalOutputPath}`);
-        return { 
-            success: true, 
-            path: finalOutputPath, 
-            groupName,
-            size: stats.size,
-            dimensions: { width, height }
-        };
+        const gifskiArgs = [
+            '--fps', '60', // Используем фиксированный высокий FPS для сборки кадров
+            '--quality', quality,
+            '--width', width,
+            '--height', height,
+            '-o', gifskiTempOutput,
+            ...pngFilePaths
+        ];
 
-    } catch (error) {
-        console.error(`Ошибка конвертации для группы ${groupName}:`, error);
-        return { success: false, error: error.message, groupName };
+        try {
+            console.log(`[GIFSKI] Этап 1: Сборка кадров с качеством ${quality}...`);
+            await runCommand('gifski', gifskiPath, gifskiArgs);
+
+            console.log(`[GIFSICLE] Этап 2: Установка задержки (${frameDelay}s) и оптимизация...`);
+            const gifsicleArgs = [
+                '--delay', gifsicleDelay,
+                '-O3',
+                '--output', finalOutputPath,
+                gifskiTempOutput,
+            ];
+            await runCommand('gifsicle', gifsiclePath, gifsicleArgs);
+
+            fs.unlinkSync(gifskiTempOutput);
+            
+            const stats = fs.statSync(finalOutputPath);
+            console.log(`[RESULT] Качество: ${quality}, Задержка: ${frameDelay}s, Размер: ${(stats.size / 1024).toFixed(1)} KB`);
+
+            if (stats.size <= maxKb * 1024) {
+                console.log(`[SUCCESS] Успех! Файл в пределах лимита.`);
+                return { 
+                    success: true, 
+                    path: finalOutputPath, 
+                    groupName,
+                    size: stats.size,
+                    dimensions: { width, height },
+                    quality: quality
+                };
+            } else {
+                 console.log(`[INFO] Файл слишком большой (${(stats.size / 1024).toFixed(1)} KB), пробую качество ниже.`);
+                 fs.unlinkSync(finalOutputPath);
+            }
+
+        } catch (error) {
+            console.error(`Ошибка конвертации для группы ${groupName} с качеством ${quality}:`, error);
+            if (fs.existsSync(gifskiTempOutput)) fs.unlinkSync(gifskiTempOutput);
+            if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
+        }
     }
+
+    console.error(`[FAILURE] Не удалось сжать файл ${groupName} до ${maxKb} KB`);
+    return { success: false, error: `Не удалось сжать файл до ${maxKb} KB`, groupName };
 }
 
 module.exports = {

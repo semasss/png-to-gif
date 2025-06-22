@@ -41,6 +41,7 @@ const colorCountSelect = document.getElementById('color-count');
 const ditherTypeSelect = document.getElementById('dither-type');
 const groupsInfo = document.getElementById('groups-info');
 const groupsCountSpan = document.getElementById('groups-count');
+const openOutputFolderBtn = document.getElementById('open-output-folder-button');
 
 // Функция для отображения статуса с улучшенным логированием
 function showStatus(message, type = 'info') {
@@ -146,6 +147,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Загружаем ASCII логотип
     loadAsciiLogo();
+    
+    // Устанавливаем значение по умолчанию для задержки кадра
+    if (frameDelayInput) {
+        frameDelayInput.value = '3';
+    }
     
     console.log('[INIT] Инициализация завершена');
 });
@@ -373,8 +379,8 @@ if (convertButton) {
             return;
         }
         
-        const frameDelaySeconds = parseFloat(frameDelayInput?.value || 3);
-        const colorCount = parseInt(colorCountSelect?.value || '256');
+        const frameDelaySeconds = parseFloat(frameDelayInput?.value || 0.1);
+        const maxKb = parseInt(maxSizeSelect?.value || '500');
         
         if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.01) {
             showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.01 сек)', 'error');
@@ -404,10 +410,7 @@ if (convertButton) {
                         pngFilePaths: files.map(f => f.path),
                         outputDir: selectedDirectory,
                         frameDelay: frameDelaySeconds,
-                        quality: 90,
-                        maxKb: 500,
-                        colorCount: colorCount,
-                        ditherType: 'floyd',
+                        maxKb: maxKb,
                     });
                     
                     if (result.success) {
@@ -419,7 +422,7 @@ if (convertButton) {
                             name: groupName,
                             size: result.size,
                             dimensions: result.dimensions,
-                            finalColorCount: result.finalColorCount || colorCount,
+                            finalColorCount: result.quality || 'N/A',
                         });
                         
                         console.log(`[CONVERT] Группа ${groupName} сконвертирована успешно`);
@@ -464,7 +467,7 @@ function displayResults() {
         const card = document.createElement('div');
         card.className = 'result-card';
         
-        const colorInfo = `<p>Цветов: до ${result.finalColorCount}</p>`;
+        const colorInfo = `<p>Качество: ${result.finalColorCount}</p>`;
         
         card.innerHTML = `
             <img src="file://${result.path}" alt="${result.name}">
@@ -501,3 +504,12 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 console.log('[RENDERER] Скрипт renderer.js загружен полностью');
+
+// Обработчик открытия папки с результатами
+if (openOutputFolderBtn) {
+    openOutputFolderBtn.addEventListener('click', () => {
+        if (selectedDirectory) {
+            window.electronAPI.openPath(selectedDirectory);
+        }
+    });
+}

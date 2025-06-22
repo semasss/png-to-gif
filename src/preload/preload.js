@@ -105,7 +105,11 @@ const electronAPI = {
         }
     },
     
-    onConversionProgress: (callback) => ipcRenderer.on('conversion-progress', (_event, value) => callback(value)),
+    onConversionProgress: (callback) => ipcRenderer.on('conversion:progress', (_event, value) => callback(value)),
+    onConversionComplete: (callback) => ipcRenderer.on('conversion:complete', (_event, value) => callback(value)),
+    showItemInFolder: (filePath) => ipcRenderer.send('app:show-item-in-folder', filePath),
+    openPath: (path) => ipcRenderer.send('app:open-path', path),
+    openExternal: (url) => ipcRenderer.send('app:open-external', url),
 };
 
 // Проверяем доступность contextBridge

@@ -55,10 +55,14 @@
 
     <!-- Страница результатов -->
     <div id="results-page" class="page">
-      <button id="back-button" class="back-btn">← Назад</button>
-      <h2>Результаты конвертации</h2>
-      <div id="results-grid" class="results-grid"></div>
-      <button id="open-folder-button" class="convert-btn">Открыть папку с результатами</button>
+      <div class="results-header">
+        <h2>Результаты</h2>
+        <div class="results-actions">
+          <button id="back-to-main" class="button secondary">Назад</button>
+          <button id="open-output-folder-button" class="button">Открыть папку</button>
+        </div>
+      </div>
+      <div id="results-grid" class="result-grid"></div>
     </div>
 
     <!-- Модалки -->

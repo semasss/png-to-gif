@@ -91,3 +91,21 @@ ipcMain.handle('get-config', () => {
     }
     return defaultConfig;
 });
+
+ipcMain.on('app:show-item-in-folder', (event, filePath) => {
+    if (filePath) {
+        shell.showItemInFolder(filePath);
+    }
+});
+
+ipcMain.on('app:open-path', (event, path) => {
+    if (path) {
+        shell.openPath(path);
+    }
+});
+
+ipcMain.on('app:open-external', (event, url) => {
+    if (url) {
+        shell.openExternal(url);
+    }
+});
