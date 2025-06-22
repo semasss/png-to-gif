@@ -1,10 +1,199 @@
-// Исправленный renderer.js с улучшенной диагностикой
+// Исправленный renderer.js с улучшенной диагностикой и системой отчетности
 
 let selectedDirectory = null;
 let pngFiles = [];
 let groupedFiles = {};
 let conversionResults = [];
 let defaultConfig = {};
+
+// ================================================================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УЛУЧШЕННОЙ ОТЧЕТНОСТИ
+// ================================================================================
+
+function formatDateTime(date) {
+    return date.toLocaleString('ru-RU', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
+function formatTimestamp(date) {
+    return date.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${seconds} сек`;
+    } else if (seconds < 3600) {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${minutes} мин ${remainingSeconds} сек`;
+    } else {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours} ч ${minutes} мин`;
+    }
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Б';
+    
+    const k = 1024;
+    const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function generateDetailedReport(conversionResults, sessionLog, sessionInfo) {
+    const { sessionStart, sessionEnd, totalGroups, completedGroups, selectedDirectory, settings } = sessionInfo;
+    
+    // Вычисляем статистику
+    const duration = Math.round((sessionEnd - sessionStart) / 1000); // в секундах
+    const successfulConversions = conversionResults.filter(r => r.success).length;
+    const failedConversions = conversionResults.filter(r => !r.success).length;
+    
+    let totalInputFiles = 0;
+    let totalOutputSize = 0;
+    let generatedGifs = [];
+    
+    conversionResults.forEach(result => {
+        if (result.success) {
+            totalInputFiles += result.inputFilesCount || 0;
+            totalOutputSize += result.outputSize || 0;
+            generatedGifs.push({
+                name: result.groupName,
+                size: result.outputSize || 0,
+                inputFiles: result.inputFilesCount || 0,
+                quality: result.quality || 'Высокое'
+            });
+        }
+    });
+
+    // Генерируем красивый отчет
+    let report = '';
+    
+    // ЗАГОЛОВОК ОТЧЕТА
+    report += '╔══════════════════════════════════════════════════════════════════════════════╗\n';
+    report += '║                            ОТЧЕТ О КОНВЕРТАЦИИ                              ║\n';
+    report += '║                        PNG/JPEG → GIF Конвертер                             ║\n';
+    report += '╚══════════════════════════════════════════════════════════════════════════════╝\n\n';
+
+    // ИНФОРМАЦИЯ О СЕССИИ
+    report += '┌─ ИНФОРМАЦИЯ О СЕССИИ ────────────────────────────────────────────────────────┐\n';
+    report += `│ 📅 Дата начала: ${formatDateTime(sessionStart)}\n`;
+    report += `│ 🏁 Дата окончания: ${formatDateTime(sessionEnd)}\n`;
+    report += `│ ⏱️  Продолжительность: ${formatDuration(duration)}\n`;
+    report += `│ 📁 Исходная папка: ${selectedDirectory}\n`;
+    report += `│ 💾 Папка результатов: Результаты конвертации - ${formatTimestamp(sessionStart)}\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+
+    // НАСТРОЙКИ КОНВЕРТАЦИИ
+    report += '┌─ НАСТРОЙКИ КОНВЕРТАЦИИ ──────────────────────────────────────────────────────┐\n';
+    report += `│ ⏰ Задержка между кадрами: ${settings.frameDelay} сек\n`;
+    report += `│ 📏 Максимальный размер файла: ${settings.maxKb} КБ\n`;
+    report += `│ 🎨 Качество сжатия: Автоматическое\n`;
+    report += `│ ⚡ Оптимизация: Включена\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+
+    // СТАТИСТИКА РЕЗУЛЬТАТОВ
+    report += '┌─ СТАТИСТИКА РЕЗУЛЬТАТОВ ─────────────────────────────────────────────────────┐\n';
+    report += `│ 📊 Всего групп для обработки: ${totalGroups}\n`;
+    report += `│ ✅ Успешно сконвертировано: ${successfulConversions}\n`;
+    if (failedConversions > 0) {
+        report += `│ ❌ Неудачных конвертаций: ${failedConversions}\n`;
+    }
+    report += `│ 🖼️  Общее количество входных файлов: ${totalInputFiles}\n`;
+    report += `│ 🎬 Сгенерировано GIF файлов: ${generatedGifs.length}\n`;
+    report += `│ 💽 Общий размер результатов: ${formatFileSize(totalOutputSize)}\n`;
+    report += `│ 📈 Процент успеха: ${Math.round((successfulConversions / totalGroups) * 100)}%\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+
+    // ДЕТАЛИ СГЕНЕРИРОВАННЫХ ФАЙЛОВ
+    if (generatedGifs.length > 0) {
+        report += '┌─ СГЕНЕРИРОВАННЫЕ GIF ФАЙЛЫ ──────────────────────────────────────────────────┐\n';
+        generatedGifs.forEach((gif, index) => {
+            const prefix = index === generatedGifs.length - 1 ? '└─' : '├─';
+            report += `│ ${prefix} 🎬 ${gif.name}.gif\n`;
+            report += `│ │  ├─ 💽 Размер файла: ${formatFileSize(gif.size)}\n`;
+            report += `│ │  ├─ 🖼️  Входных изображений: ${gif.inputFiles}\n`;
+            if (index < generatedGifs.length - 1) {
+                report += `│ │  └─ ⭐ Качество: ${gif.quality}\n`;
+                report += '│ │\n';
+            } else {
+                report += `│ └─ ⭐ Качество: ${gif.quality}\n`;
+            }
+        });
+        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    }
+
+    // ОШИБКИ И ПРЕДУПРЕЖДЕНИЯ (если есть)
+    const errors = conversionResults.filter(r => !r.success);
+    if (errors.length > 0) {
+        report += '┌─ ОШИБКИ И ПРЕДУПРЕЖДЕНИЯ ────────────────────────────────────────────────────┐\n';
+        errors.forEach((error, index) => {
+            const prefix = index === errors.length - 1 ? '└─' : '├─';
+            report += `│ ${prefix} ❌ ${error.groupName}: ${error.error}\n`;
+        });
+        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    }
+
+    // ПРОИЗВОДИТЕЛЬНОСТЬ
+    if (successfulConversions > 0) {
+        const avgTimePerGroup = duration / successfulConversions;
+        const avgFilesPerGroup = totalInputFiles / successfulConversions;
+        
+        report += '┌─ ПРОИЗВОДИТЕЛЬНОСТЬ ─────────────────────────────────────────────────────────┐\n';
+        report += `│ ⚡ Среднее время на группу: ${avgTimePerGroup.toFixed(1)} сек\n`;
+        report += `│ 📊 Среднее количество файлов в группе: ${Math.round(avgFilesPerGroup)}\n`;
+        report += `│ 🚀 Файлов обработано в секунду: ${(totalInputFiles / duration).toFixed(1)}\n`;
+        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    }
+
+    // ПОДРОБНЫЕ ЛОГИ КОНВЕРТАЦИИ
+    report += '╔══════════════════════════════════════════════════════════════════════════════╗\n';
+    report += '║                           ПОДРОБНЫЕ ЛОГИ                                    ║\n';
+    report += '╚══════════════════════════════════════════════════════════════════════════════╝\n\n';
+
+    // Форматируем существующие логи
+    sessionLog.forEach(logLine => {
+        if (logLine.includes('============================================================')) {
+            report += '═'.repeat(80) + '\n';
+        } else if (logLine.includes('------------------------------------------------------------')) {
+            report += '─'.repeat(80) + '\n';
+        } else if (logLine.startsWith('* ')) {
+            report += `🚀 ${logLine.substring(2)}\n`;
+        } else if (logLine.startsWith('- ')) {
+            report += `   ${logLine}\n`;
+        } else if (logLine.includes('✓') || logLine.includes('успешно')) {
+            report += `✅ ${logLine}\n`;
+        } else if (logLine.includes('✗') || logLine.includes('ошибка')) {
+            report += `❌ ${logLine}\n`;
+        } else if (logLine.includes('[ПРЕ-ПРОЦЕССИНГ]')) {
+            report += `🔄 ${logLine}\n`;
+        } else if (logLine.includes('[ОПТИМИЗАЦИЯ]')) {
+            report += `⚡ ${logLine}\n`;
+        } else {
+            report += `   ${logLine}\n`;
+        }
+    });
+
+    // ПОДВАЛ ОТЧЕТА
+    report += '\n' + '═'.repeat(80) + '\n';
+    report += `📝 Отчет сгенерирован: ${formatDateTime(new Date())}\n`;
+    report += `🔧 PNG/JPEG → GIF Конвертер v2.0\n`;
+    report += '═'.repeat(80) + '\n';
+
+    return report;
+}
+
+// ================================================================================
+// ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ
+// ================================================================================
 
 // Подписка на события прогресса
 window.electronAPI.onConversionProgress((data) => {
@@ -372,7 +561,7 @@ function displayFiles(groups) {
     }
 }
 
-// Конвертация в GIF
+// Конвертация в GIF с улучшенной отчетностью
 if (convertButton) {
     convertButton.addEventListener('click', async () => {
         console.log('[CONVERT] Начало конвертации');
@@ -394,6 +583,9 @@ if (convertButton) {
         progressContainer.style.display = 'block';
         progressBar.style.width = '0%';
         progressText.textContent = 'Подготовка...';
+        
+        // ДОБАВЛЯЕМ ВРЕМЯ НАЧАЛА СЕССИИ
+        const sessionStartTime = new Date();
         
         let totalGroups = Object.keys(groupedFiles).length;
         let completedGroups = 0;
@@ -451,13 +643,29 @@ if (convertButton) {
             }
             displayResults();
 
-            // Сохраняем общий лог в конце сессии
-            if(sessionOutputDir && completedGroups > 0) {
-                sessionLog.push(`\nСессия конвертации завершена: ${new Date().toISOString()}`);
-                await window.electronAPI.saveLog({
-                    logContent: sessionLog.join('\n'),
+            // УЛУЧШЕННАЯ СИСТЕМА СОХРАНЕНИЯ ОТЧЕТА
+            if (sessionOutputDir && conversionResults.length > 0) {
+                const finalReport = generateDetailedReport(conversionResults, sessionLog, {
+                    sessionStart: sessionStartTime,
+                    sessionEnd: new Date(),
+                    totalGroups: totalGroups,
+                    completedGroups: completedGroups,
+                    selectedDirectory: selectedDirectory,
+                    settings: {
+                        frameDelay: frameDelaySeconds,
+                        maxKb: maxKb
+                    }
+                });
+                
+                const saveResult = await window.electronAPI.saveLog({
+                    logContent: finalReport,
                     directory: sessionOutputDir
                 });
+                
+                if (saveResult && saveResult.success) {
+                    console.log('[REPORT] Детальный отчет сохранен:', saveResult.reportPath);
+                    console.log('[REPORT] Краткий отчет сохранен:', saveResult.summaryPath);
+                }
             }
 
         } catch (error) {

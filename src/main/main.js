@@ -6,6 +6,40 @@ const conversionService = require('../core/conversion-service');
 
 let mainWindow;
 
+// ================================================================================
+// ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КРАТКОГО ОТЧЕТА
+// ================================================================================
+
+function generateQuickSummary(fullReport) {
+    const lines = fullReport.split('\n');
+    let summary = '';
+    
+    summary += '╔════════════════════════════════════════════╗\n';
+    summary += '║           КРАТКИЙ ОТЧЕТ                    ║\n';
+    summary += '╚════════════════════════════════════════════╝\n\n';
+    
+    // Извлекаем ключевую информацию из полного отчета
+    lines.forEach(line => {
+        if (line.includes('Дата окончания:') ||
+            line.includes('Продолжительность:') ||
+            line.includes('Успешно сконвертировано:') ||
+            line.includes('Неудачных конвертаций:') ||
+            line.includes('Общий размер результатов:') ||
+            line.includes('Процент успеха:')) {
+            summary += line + '\n';
+        }
+    });
+    
+    summary += '\n📁 Подробный отчет см. в файле ОТЧЕТ_КОНВЕРТАЦИИ_*.txt\n';
+    summary += `🕒 Создано: ${new Date().toLocaleString('ru-RU')}\n`;
+    
+    return summary;
+}
+
+// ================================================================================
+// ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ
+// ================================================================================
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 800,
@@ -78,16 +112,51 @@ ipcMain.handle('open-folder', (event, folderPath) => {
     shell.openPath(folderPath);
 });
 
+// ================================================================================
+// УЛУЧШЕННЫЙ ОБРАБОТЧИК СОХРАНЕНИЯ ОТЧЕТА
+// ================================================================================
+
 ipcMain.handle('save-log', (event, { logContent, directory }) => {
-    if (!logContent || !directory) return;
+    if (!logContent || !directory) {
+        console.error('[REPORT] Недостаточно данных для сохранения отчета');
+        return { success: false, error: 'Недостаточно данных' };
+    }
+    
     try {
-        const logPath = path.join(directory, 'conversion_log.txt');
-        fs.writeFileSync(logPath, logContent, 'utf-8');
-        console.log(`[LOG] Сессионный лог сохранен в: ${logPath}`);
+        // Создаем красивое имя файла с временной меткой
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const logPath = path.join(directory, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);
+        
+        // Записываем отчет в UTF-8 с BOM для лучшей совместимости
+        const BOM = '\uFEFF';
+        fs.writeFileSync(logPath, BOM + logContent, 'utf-8');
+        
+        console.log(`[REPORT] Детальный отчет сохранен: ${logPath}`);
+        
+        // Также сохраняем краткую версию для быстрого просмотра
+        const summaryPath = path.join(directory, 'КРАТКИЙ_ОТЧЕТ.txt');
+        const summaryContent = generateQuickSummary(logContent);
+        fs.writeFileSync(summaryPath, BOM + summaryContent, 'utf-8');
+        
+        console.log(`[REPORT] Краткий отчет сохранен: ${summaryPath}`);
+        
+        return { 
+            success: true, 
+            reportPath: logPath, 
+            summaryPath: summaryPath 
+        };
     } catch (error) {
-        console.error('[LOG] Ошибка сохранения сессионного лога:', error);
+        console.error('[REPORT] Ошибка сохранения отчета:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
     }
 });
+
+// ================================================================================
+// ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ
+// ================================================================================
 
 ipcMain.handle('get-config', () => {
     const configPath = path.join(__dirname, 'config.json');
@@ -105,6 +174,31 @@ ipcMain.handle('get-config', () => {
         console.error('Ошибка чтения config.json:', error);
     }
     return defaultConfig;
+});
+
+// Обработчик для получения информации о файле
+ipcMain.handle('get-file-info', (event, filePath) => {
+    try {
+        if (!fs.existsSync(filePath)) {
+            return { success: false, error: 'Файл не найден' };
+        }
+        
+        const stats = fs.statSync(filePath);
+        return {
+            success: true,
+            size: stats.size,
+            created: stats.birthtime,
+            modified: stats.mtime,
+            isFile: stats.isFile(),
+            isDirectory: stats.isDirectory()
+        };
+    } catch (error) {
+        console.error('[FILE_INFO] Ошибка получения информации о файле:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
 });
 
 ipcMain.on('app:show-item-in-folder', (event, filePath) => {

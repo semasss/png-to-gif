@@ -8,6 +8,22 @@ const { Image } = require('image-js');
 // ВАЖНО: Укажите ваш API-ключ здесь. Его можно получить на https://tinypng.com/developers
 const TINYPNG_API_KEY = 'YOUR_API_KEY_HERE';
 
+// ================================================================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УЛУЧШЕННОЙ ОТЧЕТНОСТИ
+// ================================================================================
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Б';
+    const k = 1024;
+    const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// ================================================================================
+// ОСНОВНЫЕ ФУНКЦИИ СЕРВИСА
+// ================================================================================
+
 /**
  * Принудительно сжимает массив изображений с помощью tiny-compressor.
  * @param {string[]} filePaths - Массив путей к файлам.
@@ -184,7 +200,7 @@ function getPngFiles(directory) {
 }
 
 /**
- * Конвертирует последовательность PNG в GIF.
+ * Конвертирует последовательность PNG в GIF с улучшенной отчетностью.
  * @param {string} groupName - Имя группы (для выходного файла).
  * @param {string[]} files - Массив путей к PNG-файлам.
  * @param {string} sourceDir - Исходная директория для сохранения GIF.
@@ -193,6 +209,9 @@ function getPngFiles(directory) {
  */
 async function convertToGif(groupName, files, sourceDir, settings) {
     const { frameDelay = 3, maxKb = 500, sessionOutputDir } = settings;
+
+    // ДОБАВЛЯЕМ ВРЕМЯ НАЧАЛА ОБРАБОТКИ
+    const startTime = Date.now();
 
     const outputDir = sessionOutputDir;
 
@@ -208,14 +227,20 @@ async function convertToGif(groupName, files, sourceDir, settings) {
         logMessages.push(message);
     };
 
+    // УЛУЧШЕННОЕ ЛОГИРОВАНИЕ С ЭМОДЗИ И ДОПОЛНИТЕЛЬНОЙ ИНФОРМАЦИЕЙ
     log(`============================================================`);
-    log(`* Начало конвертации для группы: ${groupName}`);
+    log(`[СТАРТ] 🚀 Начинаю обработку группы "${groupName}"`);
     log(`============================================================`);
-    log(`- Исходные файлы: ${files.length} шт.`);
-    log(`- Настройки:`);
-    log(`  - Задержка между кадрами: ${frameDelay}s`);
-    log(`  - Максимальный размер файла: ${maxKb} KB`);
-    log(`- Папка для сохранения: ${outputDir}`);
+    log(`[ФАЙЛЫ] 📁 Найдено файлов: ${files.length}`);
+    files.forEach((file, index) => {
+        log(`[ФАЙЛЫ]   ${index + 1}. ${path.basename(file.path)}`);
+    });
+    log(`[НАСТРОЙКИ] ⚙️ Параметры конвертации:`);
+    log(`[НАСТРОЙКИ]   - Задержка между кадрами: ${frameDelay}s`);
+    log(`[НАСТРОЙКИ]   - Максимальный размер файла: ${maxKb} KB`);
+    log(`[НАСТРОЙКИ]   - Время начала: ${new Date().toLocaleString('ru-RU')}`);
+    log(`[НАСТРОЙКИ]   - Операционная система: ${process.platform}`);
+    log(`[ПУТЬ] 💾 Папка для сохранения: ${outputDir}`);
     log(`------------------------------------------------------------`);
 
     // --- Принудительное сжатие всех исходных файлов ---
@@ -231,7 +256,7 @@ async function convertToGif(groupName, files, sourceDir, settings) {
         const hasJpeg = files.some(file => file.path.toLowerCase().endsWith('.jpg') || file.path.toLowerCase().endsWith('.jpeg'));
 
         if (hasJpeg) {
-            log('[ПРЕ-ПРОЦЕССИНГ] Обнаружены JPEG файлы. Начинаю конвертацию в временные PNG...');
+            log('[ПРЕ-ПРОЦЕССИНГ] 🔄 Обнаружены JPEG файлы. Начинаю конвертацию в временные PNG...');
             cleanupTempDir = true;
             if (!fs.existsSync(tempPngDir)) {
                 fs.mkdirSync(tempPngDir, { recursive: true });
@@ -243,12 +268,12 @@ async function convertToGif(groupName, files, sourceDir, settings) {
                     const image = await Image.load(file.path);
                     const newPath = path.join(tempPngDir, `${index}.png`);
                     await image.save(newPath);
-                    log(`  - Конвертирован ${path.basename(file.path)} -> ${path.basename(newPath)}`);
+                    log(`[ПРЕ-ПРОЦЕССИНГ] 🔄 Конвертирован ${path.basename(file.path)} -> ${path.basename(newPath)}`);
                     return newPath;
                 }
                 return file.path;
             }));
-            log('[ПРЕ-ПРОЦЕССИНГ] Конвертация в PNG завершена.');
+            log('[ПРЕ-ПРОЦЕССИНГ] ✅ Конвертация в PNG завершена.');
         } else {
             processedFilePaths = files.map(file => file.path);
         }
@@ -259,26 +284,39 @@ async function convertToGif(groupName, files, sourceDir, settings) {
         if (!gifskiPath || !gifsiclePath) {
             const missing = [!gifskiPath && 'gifski', !gifsiclePath && 'gifsicle'].filter(Boolean).join(', ');
             const errorMsg = `Критически важные утилиты не найдены: ${missing}.`;
-            log(`[ОШИБКА] ${errorMsg}`);
-            return { success: false, error: errorMsg, groupName, logMessages, outputDir: outputDir };
+            log(`[ОШИБКА] ❌ ${errorMsg}`);
+            
+            const endTime = Date.now();
+            const processingTime = endTime - startTime;
+            
+            return { 
+                success: false, 
+                error: errorMsg, 
+                groupName,
+                inputFilesCount: files.length,
+                processingTime: processingTime,
+                settings: { frameDelay, maxKb },
+                logMessages, 
+                outputDir: outputDir 
+            };
         }
 
         const firstImage = await Image.load(processedFilePaths[0]);
         const { width, height } = firstImage;
-        log(`- Разрешение изображений: ${width}x${height}`);
+        log(`[АНАЛИЗ] 📐 Разрешение изображений: ${width}x${height}`);
         
         const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
-        log(`- Задержка для gifsicle: ${gifsicleDelay} (в сотых долях секунды)`);
+        log(`[АНАЛИЗ] ⏱️ Задержка для gifsicle: ${gifsicleDelay} (в сотых долях секунды)`);
 
         const qualityLevels = [100, 95, 90, 85, 80];
         const lossyQualityLevels = [100, 95, 90, 85, 80, 75, 70];
         const colorLevels = [256, 192, 128, 64];
         
-        log(`\n--- Начало перебора параметров ---`);
-        log(`- Уровни качества (gifski --quality): ${qualityLevels.join(', ')}`);
-        log(`- Уровни сжатия с потерями (gifski --lossy-quality): ${lossyQualityLevels.join(', ')}`);
-        log(`- Количество цветов (gifsicle --colors): ${colorLevels.join(', ')}`);
-        log(`------------------------------------\n`);
+        log(`[ОПТИМИЗАЦИЯ] ⚡ Начало перебора параметров`);
+        log(`[ОПТИМИЗАЦИЯ]   - Уровни качества (gifski --quality): ${qualityLevels.join(', ')}`);
+        log(`[ОПТИМИЗАЦИЯ]   - Уровни сжатия с потерями (gifski --lossy-quality): ${lossyQualityLevels.join(', ')}`);
+        log(`[ОПТИМИЗАЦИЯ]   - Количество цветов (gifsicle --colors): ${colorLevels.join(', ')}`);
+        log(`------------------------------------------------------------`);
 
         let finalResult = null;
 
@@ -298,12 +336,12 @@ async function convertToGif(groupName, files, sourceDir, settings) {
                 ];
 
                 try {
-                    log(`[ПОПЫТКА] gifski | качество: ${quality}, сжатие: ${lossy}`);
+                    log(`[ПОПЫТКА] ⚡ gifski | качество: ${quality}, сжатие: ${lossy}`);
                     await runCommand('gifski', gifskiPath, gifskiArgs);
 
-                    log(`  [ИНФО] gifski завершен. Начинаю оптимизацию с gifsicle...`);
+                    log(`[ИНФО] ✅ gifski завершен. Начинаю оптимизацию с gifsicle...`);
                     for (const colors of colorLevels) {
-                        log(`    [ПОПЫТКА] gifsicle | цвета: ${colors}`);
+                        log(`[ПОПЫТКА] 🎨 gifsicle | цвета: ${colors}`);
                         const gifsicleTempOutput = path.join(outputDir, `${groupName}_temp_gifsicle.gif`);
 
                         try {
@@ -320,26 +358,39 @@ async function convertToGif(groupName, files, sourceDir, settings) {
                             
                             const stats = fs.statSync(gifsicleTempOutput);
                             const sizeKb = stats.size / 1024;
-                            log(`      [РЕЗУЛЬТАТ] Успешно. Размер: ${sizeKb.toFixed(2)} KB (лимит: ${maxKb} KB)`);
+                            log(`[РЕЗУЛЬТАТ] 📊 Успешно. Размер: ${formatFileSize(stats.size)} (лимит: ${maxKb} KB)`);
                             
                             if (sizeKb <= maxKb) {
-                                log(`\n[УСПЕХ] Найден подходящий размер!`);
-                                log(`- Итоговые параметры: качество=${quality}, сжатие=${lossy}, цвета=${colors}`);
-                                log(`- Итоговый файл: ${finalOutputPath}`);
+                                const endTime = Date.now();
+                                const processingTime = endTime - startTime;
+                                
+                                log(`[УСПЕХ] 🎉 Найден подходящий размер!`);
+                                log(`[ПАРАМЕТРЫ] 📋 Итоговые параметры: качество=${quality}, сжатие=${lossy}, цвета=${colors}`);
+                                log(`[РЕЗУЛЬТАТ] 💾 Размер файла: ${formatFileSize(stats.size)}`);
+                                log(`[РЕЗУЛЬТАТ] ⏱️ Время обработки: ${(processingTime / 1000).toFixed(2)} сек`);
+                                log(`[РЕЗУЛЬТАТ] 📍 Сохранено: ${finalOutputPath}`);
+                                log(`[РЕЗУЛЬТАТ] 🎯 Качество: ${stats.size < (maxKb * 1024 * 0.8) ? 'Отличное' : 'Высокое'}`);
+                                
                                 fs.renameSync(gifsicleTempOutput, finalOutputPath);
                                 
                                 finalResult = {
                                     success: true,
                                     path: finalOutputPath,
+                                    outputPath: finalOutputPath,
+                                    outputSize: stats.size,
+                                    inputFilesCount: files.length,
+                                    quality: stats.size < (maxKb * 1024 * 0.8) ? 'Отличное' : 'Высокое',
+                                    processingTime: processingTime,
                                     size: stats.size,
                                     groupName,
+                                    settings: { frameDelay, maxKb },
                                     logMessages,
                                     outputDir: outputDir
                                 };
                                 break main_loop;
                             }
                         } catch (err) {
-                            log(`    [ОШИБКА] gifsicle не удался: ${err.message.split('\n')[0]}`);
+                            log(`[ОШИБКА] ❌ gifsicle не удался: ${err.message.split('\n')[0]}`);
                         } finally {
                             if (fs.existsSync(gifsicleTempOutput)) {
                                 // fs.unlinkSync(gifsicleTempOutput);
@@ -347,7 +398,7 @@ async function convertToGif(groupName, files, sourceDir, settings) {
                         }
                     }
                 } catch (err) {
-                    log(`[ОШИБКА] gifski не удался: ${err.message.split('\n')[0]}`);
+                    log(`[ОШИБКА] ❌ gifski не удался: ${err.message.split('\n')[0]}`);
                 } finally {
                     if (fs.existsSync(gifskiTempOutput)) {
                         fs.unlinkSync(gifskiTempOutput);
@@ -357,21 +408,56 @@ async function convertToGif(groupName, files, sourceDir, settings) {
         }
 
         if (finalResult) {
-            log(`\n--- Конвертация для группы ${groupName} успешно завершена ---\n`);
+            log(`============================================================`);
+            log(`[ЗАВЕРШЕНО] 🎊 Конвертация для группы "${groupName}" успешно завершена`);
+            log(`============================================================`);
             return finalResult;
         }
         
-        log(`\n[НЕУДАЧА] Не удалось создать GIF размером меньше ${maxKb} KB для группы ${groupName}\n`);
-        return { success: false, error: `Не удалось сжать GIF до ${maxKb} KB`, groupName, logMessages, outputDir: outputDir };
+        const endTime = Date.now();
+        const processingTime = endTime - startTime;
+        
+        log(`[НЕУДАЧА] ❌ Не удалось создать GIF размером меньше ${maxKb} KB для группы "${groupName}"`);
+        log(`[НЕУДАЧА] ⏱️ Время до неудачи: ${(processingTime / 1000).toFixed(2)} сек`);
+        
+        return { 
+            success: false, 
+            error: `Не удалось сжать GIF до ${maxKb} KB`, 
+            groupName,
+            inputFilesCount: files.length,
+            processingTime: processingTime,
+            settings: { frameDelay, maxKb },
+            logMessages, 
+            outputDir: outputDir 
+        };
 
     } catch (error) {
+        const endTime = Date.now();
+        const processingTime = endTime - startTime;
+        
         console.error(`Критическая ошибка в convertToGif для группы ${groupName}:`, error);
-        logMessages.push(`\n[КРИТИЧЕСКАЯ ОШИБКА] ${error.message}`);
-        return { success: false, error: error.message, groupName, logMessages, outputDir: outputDir };
+        log(`[КРИТИЧЕСКАЯ ОШИБКА] 💥 ${error.message}`);
+        log(`[ОШИБКА] ⏱️ Время до ошибки: ${(processingTime / 1000).toFixed(2)} сек`);
+        
+        return { 
+            success: false, 
+            error: error.message, 
+            groupName,
+            inputFilesCount: files.length,
+            processingTime: processingTime,
+            settings: { frameDelay, maxKb },
+            logMessages, 
+            outputDir: outputDir 
+        };
     } finally {
+        // Очистка временных файлов
         if (cleanupTempDir && fs.existsSync(tempPngDir)) {
-            log(`[ОЧИСТКА] Удаление временной директории: ${tempPngDir}`);
-            fs.rmSync(tempPngDir, { recursive: true, force: true });
+            try {
+                fs.rmSync(tempPngDir, { recursive: true, force: true });
+                log(`[ОЧИСТКА] 🗑️ Временные файлы удалены: ${tempPngDir}`);
+            } catch (cleanupError) {
+                log(`[ПРЕДУПРЕЖДЕНИЕ] ⚠️ Не удалось очистить временные файлы: ${cleanupError.message}`);
+            }
         }
     }
 }
@@ -381,4 +467,4 @@ module.exports = {
     getGifInfo,
     getPngFiles,
     convertToGif
-}; 
+};
