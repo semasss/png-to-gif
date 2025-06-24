@@ -5,13 +5,13 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron src/main/main.js",
-    "start:react": "electron src/main/main.js --react",
     "dev": "npm start",
-    "dev:react": "npm run start:react",
     "build:react": "webpack --mode=production",
     "build": "electron-builder",
     "build-win": "electron-builder --win",
-    "build-mac": "electron-builder --mac --arm64",
+    "build-mac": "electron-builder --mac --arm64 --x64",
+    "build-mac-arm": "electron-builder --mac --arm64",
+    "build-mac-intel": "electron-builder --mac --x64",
     "postinstall": "node scripts/setup-imagemagick.js"
   },
   "author": "",

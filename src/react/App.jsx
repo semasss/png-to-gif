@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
+import styled, { ThemeProvider } from 'styled-components';
 import Button from './components/Button';
 import Input from './components/Input';
 import Card from './components/Card';
 import { Section, TitleRow, Title, Subtitle } from './components/Section';
 import ProgressBar from './components/ProgressBar';
 import { Arrow, Folder } from './components/Icons';
+import { lightTheme, darkTheme, GlobalStyle } from './theme';
 
 const Container = styled.div`
   width: 768px;
@@ -17,11 +18,21 @@ const FolderButton = styled(Button)`
   justify-content: space-between;
   font-size: 18px;
   padding: 18px 24px;
-  background: ${props => props.chosen ? '#d9d9d9' : '#dfeeff'};
-  color: ${props => props.chosen ? '#000' : '#007aff'};
+  background: ${props => props.chosen 
+    ? props.theme.colors.surface 
+    : props.theme.colors.primaryLight};
+  color: ${props => props.chosen 
+    ? props.theme.colors.text 
+    : props.theme.colors.primary};
+  border: 1px solid ${props => props.chosen 
+    ? props.theme.colors.primary 
+    : 'transparent'};
   
   &:hover:not(:disabled) {
-    background: ${props => props.chosen ? '#c9c9c9' : '#c9dcff'};
+    background: ${props => props.chosen 
+      ? props.theme.colors.surface 
+      : props.theme.colors.primaryLight};
+    opacity: 0.8;
   }
 `;
 
@@ -44,7 +55,7 @@ const GroupItem = styled.div`
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #000;
+  color: ${props => props.theme.colors.text};
 `;
 
 const TinyPreview = styled.img`
@@ -57,7 +68,7 @@ const TinyPreview = styled.img`
 const GroupsInfo = styled.p`
   font-size: 15px;
   margin-bottom: 16px;
-  color: #6e6e73;
+  color: ${props => props.theme.colors.textSecondary};
 `;
 
 const ResultsGrid = styled.div`
@@ -68,28 +79,28 @@ const ResultsGrid = styled.div`
 
 const StatusMessage = styled.div`
   padding: 15px;
-  border-radius: 12px;
+  border-radius: ${props => props.theme.colors.borderRadius};
   text-align: center;
   margin-bottom: 20px;
   font-weight: 500;
   
   &.success {
-    background-color: #4caf50;
+    background-color: ${props => props.theme.colors.success};
     color: white;
   }
   
   &.error {
-    background-color: #f44336;
+    background-color: ${props => props.theme.colors.error};
     color: white;
   }
   
   &.warning {
-    background-color: #ff9800;
+    background-color: ${props => props.theme.colors.warning};
     color: white;
   }
   
   &.info {
-    background-color: #2196f3;
+    background-color: ${props => props.theme.colors.primary};
     color: white;
   }
 `;
@@ -103,8 +114,11 @@ function App() {
   const [isConverting, setIsConverting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTask: '' });
   const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
+  const [isDarkMode, setIsDarkMode] = useState(
+    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+  );
 
-  // Check for electronAPI on mount
+  // Check for electronAPI on mount and listen to theme changes
   useEffect(() => {
     if (!window.electronAPI) {
       setStatusMessage({
@@ -112,6 +126,13 @@ function App() {
         type: 'error'
       });
     }
+
+    // Listen for theme changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e) => setIsDarkMode(e.matches);
+    
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
   }, []);
 
   // Handlers
@@ -271,7 +292,9 @@ function App() {
   const canConvert = selectedDirectory && groupsCount > 0 && !isConverting;
 
   return (
-    <Container>
+    <ThemeProvider theme={isDarkMode ? darkTheme : lightTheme}>
+      <GlobalStyle />
+      <Container>
       {/* Status Message */}
       {statusMessage.text && (
         <StatusMessage className={statusMessage.type}>
@@ -304,11 +327,11 @@ function App() {
                 <GroupItem key={groupName}>
                   <TinyPreview src={`file://${files[0].path}`} alt="preview" />
                   {groupName.replace(/_/g, ' ')} 
-                  <span style={{ color: '#6e6e73', fontSize: '0.85em' }}>({files.length})</span>
+                  <span style={{ color: 'currentColor', opacity: 0.7, fontSize: '0.85em' }}>({files.length})</span>
                 </GroupItem>
               ))}
               {groupsCount > 10 && (
-                <GroupItem style={{ color: '#6e6e73', fontStyle: 'italic' }}>
+                <GroupItem style={{ opacity: 0.7, fontStyle: 'italic' }}>
                   ... и ещё {groupsCount - 10} групп
                 </GroupItem>
               )}
@@ -393,7 +416,8 @@ function App() {
           </ResultsGrid>
         </Section>
       )}
-    </Container>
+      </Container>
+    </ThemeProvider>
   );
 }
 

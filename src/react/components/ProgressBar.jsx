@@ -6,7 +6,7 @@ const ProgressContainer = styled.div`
 `;
 
 const ProgressBackground = styled.div`
-  background-color: #eef2f6;
+  background-color: ${props => props.theme.colors.border};
   border-radius: 8px;
   height: 8px;
   width: 100%;
@@ -14,7 +14,7 @@ const ProgressBackground = styled.div`
 `;
 
 const ProgressForeground = styled.div`
-  background: linear-gradient(90deg, #007aff 0%, #0051ff 100%);
+  background: linear-gradient(90deg, ${props => props.theme.colors.primary} 0%, ${props => props.theme.colors.primaryDark} 100%);
   height: 100%;
   width: ${props => props.percentage}%;
   border-radius: 8px;
@@ -25,14 +25,17 @@ const ProgressText = styled.p`
   text-align: center;
   margin-top: 8px;
   font-size: 14px;
-  color: #6e6e73;
+  color: ${props => props.theme.colors.textSecondary};
+  transition: color 0.3s ease;
 `;
 
 const DetailStatus = styled.p`
   text-align: center;
   margin-top: 4px;
   font-size: 12px;
-  color: #8a8a8e;
+  color: ${props => props.theme.colors.textSecondary};
+  opacity: 0.8;
+  transition: color 0.3s ease;
 `;
 
 function ProgressBar({ current, total, currentTask, visible = false }) {

@@ -214,7 +214,14 @@ async function binarySearchDiscrete(values, testFn, findHighest = true) {
 async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
     const { frameDelay = 3, maxKb = 510 } = settings;
     const maxBytes = maxKb * 1024;
-    const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
+    
+    // Создаем папку GIF внутри выходной директории
+    const gifFolder = path.join(outputDir, 'GIF');
+    if (!fs.existsSync(gifFolder)) {
+        fs.mkdirSync(gifFolder, { recursive: true });
+    }
+    
+    const finalOutputPath = path.join(gifFolder, `${groupName}.gif`);
     const log = (message) => console.log(`[${groupName}] ${message}`);
 
     const cleanupFiles = (...files) => {
@@ -257,7 +264,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         }
 
         log('Шаг 2/5: Создание "золотого" GIF (качество 100%)...');
-        const rawGifPath = path.join(outputDir, `${groupName}_raw.gif`);
+        const rawGifPath = path.join(gifFolder, `${groupName}_raw.gif`);
         await runCommand('gifski', gifskiPath, [
             '--fps', '60',
             '--quality', '100',
@@ -268,7 +275,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         ]);
 
         const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
-        let optimizedPath = path.join(outputDir, `${groupName}_optimized.gif`);
+        let optimizedPath = path.join(gifFolder, `${groupName}_optimized.gif`);
         
         const testSize = async (filePath) => {
             if (!fs.existsSync(filePath)) {
@@ -364,7 +371,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
             const newHeight = Math.floor(height * scaleFactor);
             log(`  - Уменьшаем до ${newWidth}x${newHeight} (k=${scaleFactor.toFixed(2)})...`);
             
-            const scaledPath = path.join(outputDir, `${groupName}_scaled.gif`);
+            const scaledPath = path.join(gifFolder, `${groupName}_scaled.gif`);
             const finalArgs = [
                 '-O3',
                 '--dither',
@@ -431,8 +438,8 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
     } catch (error) {
         log(`[КРИТИЧЕСКАЯ ОШИБКА] ${error.message}`);
         cleanupFiles(
-            path.join(outputDir, `${groupName}_raw.gif`),
-            path.join(outputDir, `${groupName}_optimized.gif`),
+            path.join(gifFolder, `${groupName}_raw.gif`),
+            path.join(gifFolder, `${groupName}_optimized.gif`),
             finalOutputPath
         );
         return { success: false, error: error.message, groupName };

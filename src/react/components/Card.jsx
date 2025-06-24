@@ -6,7 +6,7 @@ const CardContainer = styled.div`
   display: flex;
   align-items: center;
   gap: 16px;
-  background: #ffffff;
+  background: ${props => props.theme.colors.surface};
   border-radius: 12px;
   padding: 16px;
   border: 2px solid transparent;
@@ -14,17 +14,17 @@ const CardContainer = styled.div`
   
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    box-shadow: ${props => props.theme.colors.shadow};
   }
   
   ${props => props.warning && css`
-    background-color: #fff8e1;
-    border-color: #ffb74d;
+    background-color: ${props.theme.colors.warning}20;
+    border-color: ${props.theme.colors.warning};
   `}
   
   ${props => props.error && css`
-    background-color: #ffebee;
-    border-color: #f44336;
+    background-color: ${props.theme.colors.error}20;
+    border-color: ${props.theme.colors.error};
   `}
 `;
 
@@ -34,7 +34,7 @@ const Preview = styled.div`
   border-radius: 8px;
   flex-shrink: 0;
   overflow: hidden;
-  background: #f5f5f5;
+  background: ${props => props.theme.colors.border};
   display: flex;
   align-items: center;
   justify-content: center;
@@ -56,20 +56,25 @@ const Info = styled.div`
 const Name = styled.div`
   font-size: 16px;
   font-weight: 600;
-  color: ${props => props.warning ? '#f57c00' : props.error ? '#c62828' : '#000'};
+  color: ${props => 
+    props.warning ? props.theme.colors.warning : 
+    props.error ? props.theme.colors.error : 
+    props.theme.colors.text};
   display: flex;
   align-items: center;
   gap: 6px;
+  transition: color 0.3s ease;
 `;
 
 const Meta = styled.div`
   font-size: 14px;
-  color: #6e6e73;
+  color: ${props => props.theme.colors.textSecondary};
+  transition: color 0.3s ease;
 `;
 
 const WarningMessage = styled.div`
-  background-color: #ffecb3;
-  color: #f57c00;
+  background-color: ${props => props.theme.colors.warning}30;
+  color: ${props => props.theme.colors.warning};
   padding: 8px 12px;
   border-radius: 8px;
   margin-top: 8px;
@@ -78,15 +83,17 @@ const WarningMessage = styled.div`
   display: flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid ${props => props.theme.colors.warning}50;
 `;
 
 const ErrorMessage = styled.div`
-  color: #c62828;
+  color: ${props => props.theme.colors.error};
   font-weight: 500;
   font-size: 14px;
   display: flex;
   align-items: center;
   gap: 6px;
+  transition: color 0.3s ease;
 `;
 
 const Actions = styled.div`
@@ -96,20 +103,22 @@ const Actions = styled.div`
 `;
 
 const ActionButton = styled.button`
-  background: #f0f4f8;
-  border: none;
+  background: ${props => props.theme.colors.primaryLight};
+  border: 1px solid ${props => props.theme.colors.border};
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 13px;
-  color: #007aff;
+  color: ${props => props.theme.colors.primary};
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   gap: 4px;
   
   &:hover {
-    background: #e2e8f0;
+    background: ${props => props.theme.colors.primaryLight};
+    opacity: 0.8;
+    border-color: ${props => props.theme.colors.primary};
   }
 `;
 

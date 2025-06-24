@@ -9,9 +9,10 @@ const InputWrapper = styled.div`
 
 const Label = styled.label`
   font-size: 14px;
-  color: #6e6e73;
+  color: ${props => props.theme.colors.textSecondary};
   margin-bottom: 8px;
   display: block;
+  transition: color 0.3s ease;
 `;
 
 const InputContainer = styled.div`
@@ -22,31 +23,33 @@ const InputContainer = styled.div`
 
 const InputField = styled.input`
   width: 100%;
-  background: #f7f7f9;
-  border: 1px solid #d1d1d6;
+  background: ${props => props.theme.colors.primaryLight};
+  border: 1px solid ${props => props.theme.colors.border};
   border-radius: 16px;
   padding: 14px 16px;
   padding-right: ${props => props.hasSuffix ? '50px' : '16px'};
   font-size: 16px;
-  color: #000;
-  transition: border-color 0.2s ease;
+  color: ${props => props.theme.colors.text};
+  transition: all 0.3s ease;
   
   &:focus {
-    border-color: #007aff;
+    border-color: ${props => props.theme.colors.primary};
     outline: none;
+    box-shadow: 0 0 0 2px ${props => props.theme.colors.primary}20;
   }
   
   &::placeholder {
-    color: #8e8e93;
+    color: ${props => props.theme.colors.textSecondary};
   }
 `;
 
 const Suffix = styled.span`
   position: absolute;
   right: 16px;
-  color: #8e8e93;
+  color: ${props => props.theme.colors.textSecondary};
   font-size: 16px;
   pointer-events: none;
+  transition: color 0.3s ease;
 `;
 
 export function Input({ label, suffix, ...props }) {

@@ -15,11 +15,11 @@ const Button = styled.button`
   text-decoration: none;
   
   ${props => props.primary && css`
-    background: linear-gradient(90deg, #007aff 0%, #0051ff 100%);
+    background: linear-gradient(90deg, ${props.theme.colors.primary} 0%, ${props.theme.colors.primaryDark} 100%);
     color: #ffffff;
     
     &:hover:not(:disabled) {
-      background: linear-gradient(90deg, #0066d9 0%, #0044d9 100%);
+      opacity: 0.9;
       transform: translateY(-1px);
     }
     
@@ -29,23 +29,27 @@ const Button = styled.button`
   `}
   
   ${props => props.secondary && css`
-    background: #dfeeff;
-    color: #007aff;
+    background: ${props.theme.colors.primaryLight};
+    color: ${props.theme.colors.primary};
+    border: 1px solid ${props.theme.colors.primary};
     
     &:hover:not(:disabled) {
-      background: #c9dcff;
+      opacity: 0.8;
     }
   `}
   
   ${props => props.ghost && css`
-    background: #eef2f6;
-    color: #6e6e73;
+    background: ${props.theme.colors.primaryLight};
+    color: ${props.theme.colors.textSecondary};
     font-size: 13px;
     padding: 4px 12px;
     border-radius: 999px;
+    border: 1px solid ${props.theme.colors.border};
     
     &:hover:not(:disabled) {
-      background: #e1e3e8;
+      background: ${props.theme.colors.primaryLight};
+      color: ${props.theme.colors.text};
+      opacity: 0.8;
     }
   `}
   
@@ -55,14 +59,15 @@ const Button = styled.button`
   `}
   
   &:disabled {
-    background: #d1d1d6;
-    color: #999;
+    background: ${props => props.theme.colors.border} !important;
+    color: ${props => props.theme.colors.textSecondary} !important;
     cursor: not-allowed;
     transform: none;
+    opacity: 0.5 !important;
   }
   
   &:focus {
-    outline: 2px solid #007aff;
+    outline: 2px solid ${props => props.theme.colors.primary};
     outline-offset: 2px;
   }
 `;

@@ -6,7 +6,7 @@ const conversionService = require('../core/conversion-service');
 const { spawn } = require('child_process');
 
 let mainWindow;
-let isReactMode = false; // По умолчанию используем обычную версию
+let isReactMode = true; // Теперь всегда используем React версию
 
 // ================================================================================
 // ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КРАТКОГО ОТЧЕТА
@@ -75,41 +75,30 @@ async function createWindow() {
         }
     });
 
-    // Проверяем аргументы командной строки для выбора версии
-    if (process.argv.includes('--react')) {
-        isReactMode = true;
-    }
-
-    if (isReactMode) {
-        try {
-            // Собираем React версию если нужно
-            const reactBuildPath = path.join(__dirname, '..', '..', 'dist', 'react', 'index.html');
-            if (!fs.existsSync(reactBuildPath) || isDev) {
-                await buildReactApp();
-            }
-            
-            console.log('[WINDOW] Загружаем React версию');
-            mainWindow.loadFile(reactBuildPath);
-        } catch (error) {
-            console.error('[WINDOW] Ошибка загрузки React версии, переключаемся на обычную:', error);
-            isReactMode = false;
-            mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+    // Всегда используем React версию
+    try {
+        // Собираем React версию если нужно
+        const reactBuildPath = path.join(__dirname, '..', '..', 'dist', 'react', 'index.html');
+        if (!fs.existsSync(reactBuildPath) || isDev) {
+            await buildReactApp();
         }
-    } else {
-        console.log('[WINDOW] Загружаем обычную версию');
-        mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+        
+        console.log('[WINDOW] Загружаем React версию');
+        mainWindow.loadFile(reactBuildPath);
+    } catch (error) {
+        console.error('[WINDOW] Критическая ошибка загрузки React версии:', error);
+        throw error;
     }
 
     if (isDev) {
         mainWindow.webContents.openDevTools();
     }
 
-    // Добавляем меню для переключения версий
+    // Уведомляем о загрузке React версии
     mainWindow.webContents.on('did-finish-load', () => {
         if (isDev) {
             mainWindow.webContents.executeJavaScript(`
-                console.log('Текущая версия: ${isReactMode ? 'React' : 'Vanilla'}');
-                console.log('Для переключения на React версию запустите с флагом --react');
+                console.log('Загружена React версия приложения');
             `);
         }
     });
@@ -180,13 +169,13 @@ ipcMain.handle('save-log', (event, { logContent, directory }) => {
     }
     
     try {
-        // Убедимся, что директория для отчета существует.
-        // { recursive: true } создаст все необходимые родительские директории.
-        fs.mkdirSync(directory, { recursive: true });
+        // Создаем папку GIF внутри директории для отчета
+        const gifFolder = path.join(directory, 'GIF');
+        fs.mkdirSync(gifFolder, { recursive: true });
 
-        // Создаем красивое имя файла с временной меткой
+        // Создаем красивое имя файла с временной меткой и сохраняем в папку GIF
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const logPath = path.join(directory, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);
+        const logPath = path.join(gifFolder, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);
         
         // Записываем отчет в UTF-8 с BOM для лучшей совместимости
         const BOM = '\uFEFF';
@@ -194,8 +183,8 @@ ipcMain.handle('save-log', (event, { logContent, directory }) => {
         
         console.log(`[REPORT] Детальный отчет сохранен: ${logPath}`);
         
-        // Также сохраняем краткую версию для быстрого просмотра
-        const summaryPath = path.join(directory, 'КРАТКИЙ_ОТЧЕТ.txt');
+        // Также сохраняем краткую версию для быстрого просмотра в папку GIF
+        const summaryPath = path.join(gifFolder, 'КРАТКИЙ_ОТЧЕТ.txt');
         const summaryContent = generateQuickSummary(logContent);
         fs.writeFileSync(summaryPath, BOM + summaryContent, 'utf-8');
         
