@@ -163,6 +163,8 @@ function getPngFiles(directory) {
  * @returns {Promise<number|null>} Найденное значение или null.
  */
 async function binarySearchDiscrete(values, testFn, findHighest = true) {
+    if (!values || values.length === 0) return null;
+    
     let low = 0;
     let high = values.length - 1;
     let bestVal = null;
@@ -172,16 +174,25 @@ async function binarySearchDiscrete(values, testFn, findHighest = true) {
         const midIndex = Math.floor((low + high) / 2);
         const midValue = sortedValues[midIndex];
         
-        const isSuccess = await testFn(midValue);
-
-        if (isSuccess) {
-            bestVal = midValue;
-            if (findHighest) {
-                low = midIndex + 1; // Ищем большее значение
+        try {
+            const isSuccess = await testFn(midValue);
+            
+            if (isSuccess) {
+                bestVal = midValue;
+                if (findHighest) {
+                    low = midIndex + 1;
+                } else {
+                    high = midIndex - 1;
+                }
             } else {
-                high = midIndex - 1; // Ищем меньшее значение
+                if (findHighest) {
+                    high = midIndex - 1;
+                } else {
+                    low = midIndex + 1;
+                }
             }
-        } else {
+        } catch (error) {
+            console.error(`Ошибка в бинарном поиске при значении ${midValue}:`, error);
             if (findHighest) {
                 high = midIndex - 1;
             } else {
@@ -201,7 +212,7 @@ async function binarySearchDiscrete(values, testFn, findHighest = true) {
  * @returns {Promise<object>} Результат конвертации.
  */
 async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
-    const { frameDelay = 3, maxKb = 500 } = settings;
+    const { frameDelay = 3, maxKb = 510 } = settings;
     const maxBytes = maxKb * 1024;
     const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
     const log = (message) => console.log(`[${groupName}] ${message}`);
@@ -228,9 +239,14 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         }
 
         const targetBpp = maxBytes / (width * height * imagePaths.length);
-        log(`Целевой "бюджет": ${targetBpp.toFixed(3)} байт/пиксель.`);
-        if (targetBpp < 0.05) {
-            log('[ПРЕДУПРЕЖДЕНИЕ] Бюджет крайне мал. Может потребоваться значительное сжатие или уменьшение разрешения.');
+        log(`Целевой "бюджет": ${targetBpp.toFixed(3)} байт/пиксель для ${imagePaths.length} кадров ${width}x${height}.`);
+        
+        if (targetBpp < 0.03) {
+            log('[КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ] Бюджет крайне мал (<0.03 bpp). Потребуется агрессивное сжатие.');
+        } else if (targetBpp < 0.05) {
+            log('[ПРЕДУПРЕЖДЕНИЕ] Бюджет мал (<0.05 bpp). Может потребоваться значительное сжатие.');
+        } else if (targetBpp > 0.2) {
+            log('[ИНФОРМАЦИЯ] Бюджет позволяет высокое качество (>0.2 bpp).');
         }
 
         const gifskiPath = getToolPath('gifski');
@@ -255,19 +271,30 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         let optimizedPath = path.join(outputDir, `${groupName}_optimized.gif`);
         
         const testSize = async (filePath) => {
+            if (!fs.existsSync(filePath)) {
+                log(`  -> ✖ Файл не найден: ${filePath}`);
+                return false;
+            }
             const stats = fs.statSync(filePath);
             const isOk = stats.size <= maxBytes;
-            log(`  -> ${isOk ? '✔' : '✖'} ${(stats.size / 1024).toFixed(0)} KB / ${maxKb} KB`);
+            const sizeKb = (stats.size / 1024).toFixed(0);
+            const percentage = Math.round((stats.size / maxBytes) * 100);
+            log(`  -> ${isOk ? '✔' : '✖'} ${sizeKb} KB / ${maxKb} KB (${percentage}%)`);
             return isOk;
         };
         
         // --- Фаза A: Бинарный поиск по палитре ---
         log('Шаг 3/5: Поиск оптимальной палитры (gifsicle --colors)...');
-        const colorLevels = [32, 48, 64, 96, 128, 256];
+        const colorLevels = targetBpp < 0.05 ? [16, 32, 48, 64, 96, 128] : [32, 48, 64, 96, 128, 256];
         let bestColors = await binarySearchDiscrete(colorLevels, async (numColors) => {
             log(`  - Пробуем colors=${numColors}...`);
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', numColors, rawGifPath, '--output', optimizedPath]);
-            return await testSize(optimizedPath);
+            try {
+                await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', numColors, rawGifPath, '--output', optimizedPath]);
+                return await testSize(optimizedPath);
+            } catch (error) {
+                log(`  - Ошибка при colors=${numColors}: ${error.message}`);
+                return false;
+            }
         }, true);
 
         if (bestColors) {
@@ -282,14 +309,21 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         
         // --- Фаза B: Бинарный поиск по потерям ---
         log('Шаг 4/5: Поиск оптимального сжатия с потерями (gifsicle --lossy)...');
-        const lossyLevels = Array.from({length: 18}, (_, i) => 20 + i * 10); // [20, 30... 190, 200]
+        const lossyLevels = targetBpp < 0.05 
+            ? Array.from({length: 15}, (_, i) => 30 + i * 10) // [30, 40... 170, 180] для малого бюджета
+            : Array.from({length: 12}, (_, i) => 20 + i * 10); // [20, 30... 130, 140] для нормального
         const colorsArg = bestColors ? ['--colors', bestColors] : [];
 
         let bestLossy = await binarySearchDiscrete(lossyLevels, async (lossy) => {
             log(`  - Пробуем lossy=${lossy}...`);
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${lossy}`, rawGifPath, '--output', optimizedPath]);
-            return await testSize(optimizedPath);
-        }, false); // Ищем минимальное подходящее значение
+            try {
+                await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${lossy}`, rawGifPath, '--output', optimizedPath]);
+                return await testSize(optimizedPath);
+            } catch (error) {
+                log(`  - Ошибка при lossy=${lossy}: ${error.message}`);
+                return false;
+            }
+        }, false);
 
         if (bestLossy) {
             await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${bestLossy}`, '--delay', gifsicleDelay, rawGifPath, '--output', finalOutputPath]);
@@ -303,12 +337,34 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
         
         // --- Фаза C: Масштабирование как крайняя мера ---
         log('Шаг 5/5: Не удалось уложиться. Пробуем уменьшить разрешение...');
-        const currentStats = fs.statSync(bestLossy ? finalOutputPath : rawGifPath);
-        const scaleFactor = Math.sqrt(maxBytes / currentStats.size);
-
-        if (scaleFactor < 0.95) {
+        let bestAttemptPath = null;
+        let bestAttemptSize = Infinity;
+        let bestAttemptInfo = null;
+        
+        // Сохраняем лучший результат из предыдущих фаз
+        if (fs.existsSync(finalOutputPath)) {
+            const currentStats = fs.statSync(finalOutputPath);
+            bestAttemptPath = finalOutputPath;
+            bestAttemptSize = currentStats.size;
+            bestAttemptInfo = { 
+                width, 
+                height, 
+                quality: `colors=${bestColors||256}${bestLossy ? `, lossy=${bestLossy}` : ''}` 
+            };
+        } else if (fs.existsSync(rawGifPath)) {
+            const rawStats = fs.statSync(rawGifPath);
+            bestAttemptPath = rawGifPath;
+            bestAttemptSize = rawStats.size;
+            bestAttemptInfo = { width, height, quality: 'raw' };
+        }
+        
+        const scaleFactor = Math.sqrt(maxBytes / bestAttemptSize);
+        if (scaleFactor < 0.95 && scaleFactor > 0.3) { // Не масштабируем слишком сильно
             const newWidth = Math.floor(width * scaleFactor);
-            log(`  - Уменьшаем до ${newWidth}px по ширине (k=${scaleFactor.toFixed(2)})...`);
+            const newHeight = Math.floor(height * scaleFactor);
+            log(`  - Уменьшаем до ${newWidth}x${newHeight} (k=${scaleFactor.toFixed(2)})...`);
+            
+            const scaledPath = path.join(outputDir, `${groupName}_scaled.gif`);
             const finalArgs = [
                 '-O3',
                 '--dither',
@@ -317,21 +373,60 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
                 '--delay', gifsicleDelay,
                 '--scale', `${scaleFactor.toFixed(3)}`,
                 rawGifPath,
-                '--output', finalOutputPath
+                '--output', scaledPath
             ].filter(Boolean);
 
-            await runCommand('gifsicle', optimizerPath, finalArgs);
-
-            if (await testSize(finalOutputPath)) {
-                 log('Успех! Уложились в лимит после уменьшения разрешения.');
-                cleanupFiles(rawGifPath, optimizedPath);
-                const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: Math.floor(height*scaleFactor) }, quality: `scaled` };
+            try {
+                await runCommand('gifsicle', optimizerPath, finalArgs);
+                const scaledStats = fs.statSync(scaledPath);
+                
+                if (scaledStats.size <= maxBytes) {
+                    log('Успех! Уложились в лимит после уменьшения разрешения.');
+                    // Перемещаем в финальное место
+                    if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
+                    fs.renameSync(scaledPath, finalOutputPath);
+                    cleanupFiles(rawGifPath, optimizedPath);
+                    const finalStats = fs.statSync(finalOutputPath);
+                    return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: newHeight }, quality: `scaled` };
+                } else if (scaledStats.size < bestAttemptSize) {
+                    // Масштабированный результат лучше, но все еще превышает лимит
+                    bestAttemptPath = scaledPath;
+                    bestAttemptSize = scaledStats.size;
+                    bestAttemptInfo = { width: newWidth, height: newHeight, quality: 'scaled (oversized)' };
+                } else {
+                    // Удаляем неудачную попытку
+                    if (fs.existsSync(scaledPath)) fs.unlinkSync(scaledPath);
+                }
+            } catch (scaleError) {
+                log(`  - Ошибка масштабирования: ${scaleError.message}`);
+                if (fs.existsSync(scaledPath)) fs.unlinkSync(scaledPath);
             }
         }
 
+        // Сохраняем лучший результат с предупреждением
+        if (bestAttemptPath && fs.existsSync(bestAttemptPath)) {
+            log(`[ПРЕДУПРЕЖДЕНИЕ] Сохраняем лучший результат: ${(bestAttemptSize / 1024).toFixed(0)} KB > ${maxKb} KB`);
+            
+            // Перемещаем лучший результат в финальное место, если нужно
+            if (bestAttemptPath !== finalOutputPath) {
+                if (fs.existsSync(finalOutputPath)) fs.unlinkSync(finalOutputPath);
+                fs.renameSync(bestAttemptPath, finalOutputPath);
+            }
+            
+            cleanupFiles(rawGifPath, optimizedPath);
+            return { 
+                success: true, 
+                path: finalOutputPath, 
+                groupName, 
+                size: bestAttemptSize, 
+                dimensions: bestAttemptInfo, 
+                quality: bestAttemptInfo.quality,
+                warning: `Размер файла ${(bestAttemptSize / 1024).toFixed(0)} KB превышает лимит ${maxKb} KB`
+            };
+        }
+
         cleanupFiles(rawGifPath, optimizedPath, finalOutputPath);
-        throw new Error(`Не удалось сжать файл до ${maxKb} KB даже с максимальными настройками.`);
+        throw new Error(`Не удалось создать файл даже с максимальным сжатием.`);
 
     } catch (error) {
         log(`[КРИТИЧЕСКАЯ ОШИБКА] ${error.message}`);

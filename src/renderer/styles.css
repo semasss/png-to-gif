@@ -249,6 +249,46 @@ select option {
     display: block;
 }
 
+#status.warning {
+    background-color: #ff9800;
+    color: white;
+    display: block;
+}
+
+#status.info {
+    background-color: #2196f3;
+    color: white;
+    display: block;
+}
+
+.result-card.error {
+    background-color: #ffebee;
+    border: 2px solid #f44336;
+    border-radius: 12px;
+}
+
+.error-icon {
+    font-size: 24px;
+    margin-right: 12px;
+    align-self: center;
+}
+
+.error-message {
+    color: #c62828;
+    font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+    .result-card.error {
+        background-color: #3e2723;
+        border-color: #f44336;
+    }
+    
+    .error-message {
+        color: #ef5350;
+    }
+}
+
 .result-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -660,4 +700,45 @@ select option {
     width: 0%;
     border-radius: 8px;
     transition: width 0.3s ease-in-out;
+}
+
+/* Стили для предупреждающих карточек */
+.result-card.warning {
+    background-color: #fff8e1;
+    border: 2px solid #ffb74d;
+    border-radius: 12px;
+}
+
+.warning-message {
+    background-color: #ffecb3;
+    color: #f57c00;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    font-size: 0.85em;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.result-card.warning .result-info p:first-child {
+    color: #f57c00;
+    font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+    .result-card.warning {
+        background-color: #3e2723;
+        border-color: #ff8f00;
+    }
+    
+    .warning-message {
+        background-color: #5d4037;
+        color: #ffb74d;
+    }
+    
+    .result-card.warning .result-info p:first-child {
+        color: #ffb74d;
+    }
 } 

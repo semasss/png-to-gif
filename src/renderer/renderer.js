@@ -225,9 +225,9 @@ const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
 const asciiLogo = document.getElementById('ascii-logo');
 const openFolderBtn = document.getElementById('open-folder-button');
-const maxSizeSelect = document.getElementById('max-size');
+// const maxSizeSelect = document.getElementById('max-size'); // Элемент не существует в HTML
 const colorCountSelect = document.getElementById('color-count');
-const ditherTypeSelect = document.getElementById('dither-type');
+// const ditherTypeSelect = document.getElementById('dither-type'); // Элемент не существует в HTML
 const groupsInfo = document.getElementById('groups-info');
 const groupsCountSpan = document.getElementById('groups-count');
 const openOutputFolderBtn = document.getElementById('open-output-folder-button');
@@ -490,8 +490,15 @@ if (resetSettingsBtn) {
 }
 
 // Обработчик кнопки "Назад"
+const backToMainBtn = document.getElementById('back-to-main');
 if (backButton) {
     backButton.addEventListener('click', () => {
+        if (mainPage) mainPage.classList.add('active');
+        if (resultsPage) resultsPage.classList.remove('active');
+    });
+}
+if (backToMainBtn) {
+    backToMainBtn.addEventListener('click', () => {
         if (mainPage) mainPage.classList.add('active');
         if (resultsPage) resultsPage.classList.remove('active');
     });
@@ -572,7 +579,7 @@ if (convertButton) {
         }
         
         const frameDelaySeconds = parseFloat(frameDelayInput?.value || 0.1);
-        const maxKb = parseInt(maxSizeSelect?.value || '500');
+        const maxKb = 510; // Фиксированный максимальный размер
         
         if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.01) {
             showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.01 сек)', 'error');
@@ -635,9 +642,15 @@ if (convertButton) {
             }
             
             if (completedGroups === totalGroups && completedGroups > 0) {
-                showStatus(`Успешно сконвертировано ${completedGroups} групп файлов!`, 'success');
+                const warningCount = conversionResults.filter(r => r.success && r.warning).length;
+            const successMsg = warningCount > 0 
+                ? `Успешно сконвертировано ${completedGroups} групп! (${warningCount} с предупреждениями)`
+                : `Успешно сконвертировано ${completedGroups} групп файлов!`;
+            showStatus(successMsg, warningCount > 0 ? 'warning' : 'success');
             } else if (completedGroups > 0) {
-                showStatus(`Сконвертировано ${completedGroups} из ${totalGroups} групп`, 'warning');
+                const warningCount = conversionResults.filter(r => r.success && r.warning).length;
+                const warningMsg = warningCount > 0 ? ` (${warningCount} с предупреждениями)` : '';
+                showStatus(`Сконвертировано ${completedGroups} из ${totalGroups} групп${warningMsg}`, 'warning');
             } else {
                 showStatus('Не удалось сконвертировать ни одной группы', 'error');
             }
@@ -691,26 +704,38 @@ function displayResults() {
         card.className = 'result-card';
         
         if (result.success) {
+            // Проверяем наличие предупреждения о превышении размера
+            const hasWarning = result.warning;
+            const warningClass = hasWarning ? ' warning' : '';
+            const warningIcon = hasWarning ? '⚠️ ' : '';
+            const warningText = hasWarning ? `<div class="warning-message">${warningIcon}${result.warning}</div>` : '';
+            
+            card.className = `result-card${warningClass}`;
             card.innerHTML = `
                 <img src="file://${result.path}?t=${new Date().getTime()}" alt="${result.groupName}">
                 <div class="result-info">
-                    <p><strong>${result.groupName}</strong></p>
+                    <p><strong>${warningIcon}${result.groupName}</strong></p>
                     <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
-                    <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}</p> 
-                    <p>Качество: ${result.quality || 'N/A'}</p>
+                    <p>Размеры: ${result.dimensions.width || 'N/A'}x${result.dimensions.height || 'N/A'}</p> 
+                    <p>Качество: ${result.quality || 'Авто'}</p>
+                    ${warningText}
                 </div>
                 <div class="result-actions">
                     <button class="action-btn show-in-folder-btn">Показать в проводнике</button>
                 </div>
             `;
 
-            card.querySelector('.show-in-folder-btn').addEventListener('click', () => {
-                window.electronAPI.showItemInFolder(result.path);
-            });
+            const showInFolderBtn = card.querySelector('.show-in-folder-btn');
+            if (showInFolderBtn) {
+                showInFolderBtn.addEventListener('click', () => {
+                    window.electronAPI.showItemInFolder(result.path);
+                });
+            }
 
         } else {
-            card.classList.add('error');
+            card.className = 'result-card error';
             card.innerHTML = `
+                <div class="error-icon">❌</div>
                 <div class="result-info">
                     <p><strong>${result.groupName}</strong></p>
                     <p class="error-message">Ошибка: ${result.error || 'Неизвестная ошибка'}</p>
