@@ -1,760 +1,433 @@
-// Исправленный renderer.js с улучшенной диагностикой и системой отчетности
-
+// Главный файл интерфейса с полной функциональностью
 let selectedDirectory = null;
-let pngFiles = [];
 let groupedFiles = {};
 let conversionResults = [];
-let defaultConfig = {};
+let defaultConfig = { frameDelay: 3, maxKb: 510 };
 
-// ================================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УЛУЧШЕННОЙ ОТЧЕТНОСТИ
-// ================================================================================
-
-function formatDateTime(date) {
-    return date.toLocaleString('ru-RU', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-    });
-}
-
-function formatTimestamp(date) {
-    return date.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-}
-
-function formatDuration(seconds) {
-    if (seconds < 60) {
-        return `${seconds} сек`;
-    } else if (seconds < 3600) {
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = seconds % 60;
-        return `${minutes} мин ${remainingSeconds} сек`;
-    } else {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        return `${hours} ч ${minutes} мин`;
-    }
-}
-
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Б';
-    
-    const k = 1024;
-    const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function generateDetailedReport(conversionResults, sessionLog, sessionInfo) {
-    const { sessionStart, sessionEnd, totalGroups, completedGroups, selectedDirectory, settings } = sessionInfo;
-    
-    // Вычисляем статистику
-    const duration = Math.round((sessionEnd - sessionStart) / 1000); // в секундах
-    const successfulConversions = conversionResults.filter(r => r.success).length;
-    const failedConversions = conversionResults.filter(r => !r.success).length;
-    
-    let totalInputFiles = 0;
-    let totalOutputSize = 0;
-    let generatedGifs = [];
-    
-    conversionResults.forEach(result => {
-        if (result.success) {
-            totalInputFiles += result.inputFilesCount || 0;
-            totalOutputSize += result.outputSize || 0;
-            generatedGifs.push({
-                name: result.groupName,
-                size: result.outputSize || 0,
-                inputFiles: result.inputFilesCount || 0,
-                quality: result.quality || 'Высокое'
-            });
-        }
-    });
-
-    // Генерируем красивый отчет
-    let report = '';
-    
-    // ЗАГОЛОВОК ОТЧЕТА
-    report += '╔══════════════════════════════════════════════════════════════════════════════╗\n';
-    report += '║                            ОТЧЕТ О КОНВЕРТАЦИИ                              ║\n';
-    report += '║                        PNG/JPEG → GIF Конвертер                             ║\n';
-    report += '╚══════════════════════════════════════════════════════════════════════════════╝\n\n';
-
-    // ИНФОРМАЦИЯ О СЕССИИ
-    report += '┌─ ИНФОРМАЦИЯ О СЕССИИ ────────────────────────────────────────────────────────┐\n';
-    report += `│ 📅 Дата начала: ${formatDateTime(sessionStart)}\n`;
-    report += `│ 🏁 Дата окончания: ${formatDateTime(sessionEnd)}\n`;
-    report += `│ ⏱️  Продолжительность: ${formatDuration(duration)}\n`;
-    report += `│ 📁 Исходная папка: ${selectedDirectory}\n`;
-    report += `│ 💾 Папка результатов: Результаты конвертации - ${formatTimestamp(sessionStart)}\n`;
-    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-
-    // НАСТРОЙКИ КОНВЕРТАЦИИ
-    report += '┌─ НАСТРОЙКИ КОНВЕРТАЦИИ ──────────────────────────────────────────────────────┐\n';
-    report += `│ ⏰ Задержка между кадрами: ${settings.frameDelay} сек\n`;
-    report += `│ 📏 Максимальный размер файла: ${settings.maxKb} КБ\n`;
-    report += `│ 🎨 Качество сжатия: Автоматическое\n`;
-    report += `│ ⚡ Оптимизация: Включена\n`;
-    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-
-    // СТАТИСТИКА РЕЗУЛЬТАТОВ
-    report += '┌─ СТАТИСТИКА РЕЗУЛЬТАТОВ ─────────────────────────────────────────────────────┐\n';
-    report += `│ 📊 Всего групп для обработки: ${totalGroups}\n`;
-    report += `│ ✅ Успешно сконвертировано: ${successfulConversions}\n`;
-    if (failedConversions > 0) {
-        report += `│ ❌ Неудачных конвертаций: ${failedConversions}\n`;
-    }
-    report += `│ 🖼️  Общее количество входных файлов: ${totalInputFiles}\n`;
-    report += `│ 🎬 Сгенерировано GIF файлов: ${generatedGifs.length}\n`;
-    report += `│ 💽 Общий размер результатов: ${formatFileSize(totalOutputSize)}\n`;
-    report += `│ 📈 Процент успеха: ${Math.round((successfulConversions / totalGroups) * 100)}%\n`;
-    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-
-    // ДЕТАЛИ СГЕНЕРИРОВАННЫХ ФАЙЛОВ
-    if (generatedGifs.length > 0) {
-        report += '┌─ СГЕНЕРИРОВАННЫЕ GIF ФАЙЛЫ ──────────────────────────────────────────────────┐\n';
-        generatedGifs.forEach((gif, index) => {
-            const prefix = index === generatedGifs.length - 1 ? '└─' : '├─';
-            report += `│ ${prefix} 🎬 ${gif.name}.gif\n`;
-            report += `│ │  ├─ 💽 Размер файла: ${formatFileSize(gif.size)}\n`;
-            report += `│ │  ├─ 🖼️  Входных изображений: ${gif.inputFiles}\n`;
-            if (index < generatedGifs.length - 1) {
-                report += `│ │  └─ ⭐ Качество: ${gif.quality}\n`;
-                report += '│ │\n';
-            } else {
-                report += `│ └─ ⭐ Качество: ${gif.quality}\n`;
-            }
-        });
-        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-    }
-
-    // ОШИБКИ И ПРЕДУПРЕЖДЕНИЯ (если есть)
-    const errors = conversionResults.filter(r => !r.success);
-    if (errors.length > 0) {
-        report += '┌─ ОШИБКИ И ПРЕДУПРЕЖДЕНИЯ ────────────────────────────────────────────────────┐\n';
-        errors.forEach((error, index) => {
-            const prefix = index === errors.length - 1 ? '└─' : '├─';
-            report += `│ ${prefix} ❌ ${error.groupName}: ${error.error}\n`;
-        });
-        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-    }
-
-    // ПРОИЗВОДИТЕЛЬНОСТЬ
-    if (successfulConversions > 0) {
-        const avgTimePerGroup = duration / successfulConversions;
-        const avgFilesPerGroup = totalInputFiles / successfulConversions;
-        
-        report += '┌─ ПРОИЗВОДИТЕЛЬНОСТЬ ─────────────────────────────────────────────────────────┐\n';
-        report += `│ ⚡ Среднее время на группу: ${avgTimePerGroup.toFixed(1)} сек\n`;
-        report += `│ 📊 Среднее количество файлов в группе: ${Math.round(avgFilesPerGroup)}\n`;
-        report += `│ 🚀 Файлов обработано в секунду: ${(totalInputFiles / duration).toFixed(1)}\n`;
-        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
-    }
-
-    // ПОДРОБНЫЕ ЛОГИ КОНВЕРТАЦИИ
-    report += '╔══════════════════════════════════════════════════════════════════════════════╗\n';
-    report += '║                           ПОДРОБНЫЕ ЛОГИ                                    ║\n';
-    report += '╚══════════════════════════════════════════════════════════════════════════════╝\n\n';
-
-    // Форматируем существующие логи
-    sessionLog.forEach(logLine => {
-        if (logLine.includes('============================================================')) {
-            report += '═'.repeat(80) + '\n';
-        } else if (logLine.includes('------------------------------------------------------------')) {
-            report += '─'.repeat(80) + '\n';
-        } else if (logLine.startsWith('* ')) {
-            report += `🚀 ${logLine.substring(2)}\n`;
-        } else if (logLine.startsWith('- ')) {
-            report += `   ${logLine}\n`;
-        } else if (logLine.includes('✓') || logLine.includes('успешно')) {
-            report += `✅ ${logLine}\n`;
-        } else if (logLine.includes('✗') || logLine.includes('ошибка')) {
-            report += `❌ ${logLine}\n`;
-        } else if (logLine.includes('[ПРЕ-ПРОЦЕССИНГ]')) {
-            report += `🔄 ${logLine}\n`;
-        } else if (logLine.includes('[ОПТИМИЗАЦИЯ]')) {
-            report += `⚡ ${logLine}\n`;
-        } else {
-            report += `   ${logLine}\n`;
-        }
-    });
-
-    // ПОДВАЛ ОТЧЕТА
-    report += '\n' + '═'.repeat(80) + '\n';
-    report += `📝 Отчет сгенерирован: ${formatDateTime(new Date())}\n`;
-    report += `🔧 PNG/JPEG → GIF Конвертер v2.0\n`;
-    report += '═'.repeat(80) + '\n';
-
-    return report;
-}
-
-// ================================================================================
-// ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ
-// ================================================================================
-
-// Подписка на события прогресса
-window.electronAPI.onConversionProgress((data) => {
-    const { groupName, status } = data;
-    const detailStatus = document.getElementById('detail-status');
-    if (detailStatus) {
-        detailStatus.textContent = `${groupName}: ${status}`;
-    }
-});
-
-// DOM Elements
-const directoryDisplay = document.getElementById('directory-display');
-const chooseDirectoryBtn = document.getElementById('choose-directory');
-const convertButton = document.getElementById('convert-button');
-const resetSettingsBtn = document.getElementById('reset-settings');
-const frameDelayInput = document.getElementById('frame-delay');
+// Ссылки на DOM-элементы
+const selectDirectoryButton = document.getElementById('select-directory-button');
+const chooseSub = document.getElementById('choose-sub');
+const groupsInfo = document.getElementById('groups-info');
+const groupsCountSpan = document.getElementById('groups-count');
 const fileList = document.getElementById('file-list');
-const filesContainer = document.getElementById('files-container');
+const convertButton = document.getElementById('convert-button');
+const frameDelayInput = document.getElementById('frame-delay');
+const maxSizeInput = document.getElementById('max-size');
+const resetSettingsBtn = document.getElementById('reset-settings');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress');
 const progressText = document.getElementById('progress-text');
-const statusDiv = document.getElementById('status');
+const detailStatus = document.getElementById('detail-status');
 const mainPage = document.getElementById('main-page');
 const resultsPage = document.getElementById('results-page');
-const backButton = document.getElementById('back-button');
+const resultsTitle = document.getElementById('results-title');
 const resultsGrid = document.getElementById('results-grid');
-const infoButton = document.getElementById('info-link');
+const openOutputFolderBtn = document.getElementById('open-output-folder-button');
 const infoModal = document.getElementById('info-modal');
 const modalClose = document.querySelector('.modal-close');
-const asciiLogo = document.getElementById('ascii-logo');
-const openFolderBtn = document.getElementById('open-folder-button');
-const maxSizeSelect = document.getElementById('max-size');
-const colorCountSelect = document.getElementById('color-count');
-const ditherTypeSelect = document.getElementById('dither-type');
-const groupsInfo = document.getElementById('groups-info');
-const groupsCountSpan = document.getElementById('groups-count');
-const openOutputFolderBtn = document.getElementById('open-output-folder-button');
+const groupsHelpButton = document.getElementById('groups-help');
 
-// Функция для отображения статуса с улучшенным логированием
+// Функция для отображения статуса
 function showStatus(message, type = 'info') {
-    console.log(`[STATUS] ${type.toUpperCase()}: ${message}`);
-    if (statusDiv) {
-        statusDiv.textContent = message;
-        statusDiv.className = type;
-        statusDiv.style.display = 'block';
+    console.log(`[STATUS] ${type}: ${message}`);
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.className = type;
+        statusEl.style.display = 'block';
         
         setTimeout(() => {
-            statusDiv.style.display = 'none';
+            statusEl.style.display = 'none';
         }, 5000);
     }
 }
 
-// Проверка доступности electronAPI при загрузке
-function checkElectronAPI() {
-    console.log('[ДИАГНОСТИКА] Проверка доступности electronAPI...');
-    
-    if (typeof window.electronAPI === 'undefined') {
-        console.error('[ОШИБКА] window.electronAPI не доступен! Проблема с preload.js');
-        showStatus('Критическая ошибка: API недоступен. Проверьте preload.js', 'error');
-        return false;
-    }
-    
-    console.log('[OK] window.electronAPI доступен');
-    console.log('[ДИАГНОСТИКА] Доступные методы:', Object.keys(window.electronAPI));
-    
-    // Проверяем каждый необходимый метод
-    const requiredMethods = ['chooseDirectory', 'getPngFiles', 'convertToGif', 'getConfig', 'checkImageMagick'];
-    const missingMethods = requiredMethods.filter(method => typeof window.electronAPI[method] !== 'function');
-    
-    if (missingMethods.length > 0) {
-        console.error('[ОШИБКА] Отсутствуют методы:', missingMethods);
-        showStatus(`Ошибка API: отсутствуют методы ${missingMethods.join(', ')}`, 'error');
-        return false;
-    }
-    
-    console.log('[OK] Все необходимые методы API доступны');
-    return true;
+// Обновление состояния кнопки конвертации
+function updateConvertButtonState() {
+    const hasGroups = Object.keys(groupedFiles).length > 0;
+    convertButton.disabled = !selectedDirectory || !hasGroups;
 }
 
-// Загрузка и применение конфига с улучшенной обработкой ошибок
-async function loadAndApplyConfig() {
-    try {
-        console.log('[CONFIG] Загрузка конфигурации...');
-        defaultConfig = await window.electronAPI.getConfig();
-        console.log('[CONFIG] Конфигурация загружена:', defaultConfig);
-        
-        if (frameDelayInput) {
-            frameDelayInput.value = defaultConfig.frameDelay || 3;
-        }
-        
-        if (defaultConfig.colorCount && colorCountSelect) {
-            colorCountSelect.value = defaultConfig.colorCount.toString();
-        }
-        
-        console.log('[CONFIG] Конфигурация применена успешно');
-    } catch (error) {
-        console.error('[CONFIG] Ошибка загрузки конфигурации:', error);
-        showStatus('Ошибка загрузки конфигурации', 'error');
-    }
-}
-
-// Проверка наличия gifski при запуске
-async function checkGifskiAvailability() {
-    try {
-        console.log('[GIFSKI] Проверка доступности gifski...');
-        const isAvailable = await window.electronAPI.checkTools();
-        
-        if (!isAvailable) {
-            console.warn('[GIFSKI] gifski недоступен');
-            showStatus('Внимание: gifski не найден. Установите его (brew install gifski) или поместите в папку vendor и перезапустите приложение.', 'error');
-            if (convertButton) {
-                convertButton.disabled = true;
-            }
-            return false;
-        }
-        
-        console.log('[GIFSKI] gifski доступен');
-        return true;
-    } catch (error) {
-        console.error('[GIFSKI] Ошибка проверки gifski:', error);
-        showStatus('Ошибка проверки gifski', 'error');
-        return false;
-    }
-}
-
-// Инициализация при загрузке DOM
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('[INIT] Начало инициализации приложения');
+// Обновление интерфейса после выбора папки
+function updateUIAfterDirectorySelection() {
+    // Меняем текст кнопки
+    selectDirectoryButton.classList.add('chosen');
     
-    // Проверяем доступность API
-    if (!checkElectronAPI()) {
-        return; // Прекращаем инициализацию если API недоступен
-    }
+    // Меняем подзаголовок
+    chooseSub.textContent = `YYsalesCompany_24`;
     
-    // Загружаем конфигурацию
-    await loadAndApplyConfig();
+    // Показываем информацию о группах
+    const groupCount = Object.keys(groupedFiles).length;
+    groupsCountSpan.textContent = groupCount;
+    groupsInfo.style.display = 'flex';
     
-    // Проверяем gifski
-    await checkGifskiAvailability();
+    // Показываем список файлов
+    fileList.style.display = 'block';
+    displayFiles(groupedFiles);
     
-    // Загружаем ASCII логотип
-    loadAsciiLogo();
-    
-    // Устанавливаем значение по умолчанию для задержки кадра
-    if (frameDelayInput) {
-        frameDelayInput.value = '3';
-    }
-    
-    console.log('[INIT] Инициализация завершена');
-});
-
-// Загрузка ASCII логотипа с улучшенной обработкой ошибок
-function loadAsciiLogo() {
-    if (!asciiLogo) return;
-    
-    fetch('assets/logo.txt')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Файл logo.txt не найден');
-            }
-            return response.text();
-        })
-        .then(text => {
-            asciiLogo.textContent = text;
-            console.log('[LOGO] ASCII логотип загружен');
-        })
-        .catch(error => {
-            console.error('[LOGO] Ошибка загрузки логотипа:', error);
-            asciiLogo.textContent = 'Ошибка: не удалось загрузить logo.txt.\n\nПожалуйста, поместите файл logo.txt в папку src/.';
-        });
-}
-
-// Обработчик выбора директории с детальным логированием
-if (chooseDirectoryBtn) {
-    chooseDirectoryBtn.addEventListener('click', async (event) => {
-        console.log('[CLICK] Клик по кнопке выбора директории');
-        
-        // Предотвращаем всплытие события
-        event.preventDefault();
-        event.stopPropagation();
-        
-        try {
-            // Проверяем доступность API еще раз
-            if (!window.electronAPI || typeof window.electronAPI.chooseDirectory !== 'function') {
-                throw new Error('API chooseDirectory недоступен');
-            }
-            
-            console.log('[API] Вызов chooseDirectory...');
-            showStatus('Выбор папки...', 'info');
-            
-            // Вызываем диалог выбора папки
-            const result = await window.electronAPI.chooseDirectory();
-            console.log('[API] Результат chooseDirectory:', result);
-            
-            if (result && result.success && result.path) {
-                selectedDirectory = result.path;
-                console.log('[SUCCESS] Выбрана папка:', selectedDirectory);
-                
-                // Отображаем имя папки на кнопке
-                const baseFolderName = selectedDirectory.split(/[/\\]/).pop();
-                chooseDirectoryBtn.classList.add('chosen');
-                chooseDirectoryBtn.innerHTML = `${baseFolderName} <span class="arrow">›</span>`;
-                
-                if (directoryDisplay) {
-                    directoryDisplay.style.display = 'none';
-                }
-                
-                try {
-                    console.log('[FILES] Получение списка PNG файлов...');
-                    showStatus('Анализ папки...', 'info');
-                    
-                    // Получаем список PNG файлов
-                    const files = await window.electronAPI.getPngFiles(selectedDirectory);
-                    console.log('[FILES] Результат getPngFiles:', files);
-                    
-                    if (files && files.success && files.groups) {
-                        groupedFiles = files.groups;
-                        displayFiles(groupedFiles);
-                        
-                        if (convertButton) {
-                            convertButton.disabled = false;
-                        }
-                        
-                        showStatus(`Найдено ${Object.keys(groupedFiles).length} групп файлов`, 'success');
-                    } else {
-                        const errorMsg = files?.error || 'Неизвестная ошибка при получении файлов';
-                        console.error('[FILES] Ошибка:', errorMsg);
-                        showStatus(`Ошибка: ${errorMsg}`, 'error');
-                    }
-                } catch (filesError) {
-                    console.error('[FILES] Исключение при получении файлов:', filesError);
-                    showStatus(`Ошибка получения файлов: ${filesError.message}`, 'error');
-                }
-            } else {
-                console.log('[CANCEL] Выбор папки отменен или произошла ошибка');
-                if (result && result.error) {
-                    console.error('[ERROR] Ошибка при выборе папки:', result.error);
-                    showStatus(`Ошибка выбора папки: ${result.error}`, 'error');
-                }
-            }
-        } catch (error) {
-            console.error('[EXCEPTION] Критическая ошибка при выборе директории:', error);
-            showStatus(`Критическая ошибка: ${error.message}`, 'error');
-        }
-    });
-    
-    console.log('[INIT] Обработчик кнопки выбора папки установлен');
-} else {
-    console.error('[ERROR] Кнопка выбора папки не найдена в DOM!');
-}
-
-// Остальные обработчики событий...
-
-// Обработчик сброса настроек
-if (resetSettingsBtn) {
-    resetSettingsBtn.addEventListener('click', () => {
-        console.log('[RESET] Сброс настроек');
-        
-        if (frameDelayInput) {
-            frameDelayInput.value = defaultConfig.frameDelay || 3;
-        }
-        
-        if (defaultConfig.colorCount && colorCountSelect) {
-            colorCountSelect.value = defaultConfig.colorCount.toString();
-        }
-        
-        // Сбрасываем визуальное состояние кнопки выбора папки
-        if (chooseDirectoryBtn) {
-            chooseDirectoryBtn.classList.remove('chosen');
-            chooseDirectoryBtn.innerHTML = 'Выбор папки <span class="arrow">›</span>';
-        }
-        
-        if (directoryDisplay) {
-            directoryDisplay.style.display = 'none';
-        }
-        
-        if (groupsInfo) {
-            groupsInfo.style.display = 'none';
-        }
-        
-        if (fileList) {
-            fileList.innerHTML = '';
-        }
-        
-        if (convertButton) {
-            convertButton.disabled = true;
-        }
-        
-        selectedDirectory = null;
-        groupedFiles = {};
-        
-        showStatus('Настройки сброшены', 'success');
-    });
-}
-
-// Обработчик кнопки "Назад"
-if (backButton) {
-    backButton.addEventListener('click', () => {
-        if (mainPage) mainPage.classList.add('active');
-        if (resultsPage) resultsPage.classList.remove('active');
-    });
-}
-
-// Обработчик открытия папки результатов
-if (openFolderBtn) {
-    openFolderBtn.addEventListener('click', async () => {
-        const firstSuccessfulResult = conversionResults.find(r => r.success && r.outputDir);
-        if (firstSuccessfulResult) {
-            // Открываем корневую папку 'gif_conversions'
-            window.electronAPI.openPath(firstSuccessfulResult.outputDir);
-        } else if (selectedDirectory) {
-            window.electronAPI.openPath(selectedDirectory);
-        }
-    });
-}
-
-// Обработчики модального окна
-if (infoButton && infoModal) {
-    infoButton.addEventListener('click', () => {
-        infoModal.classList.add('active');
-    });
-}
-
-if (modalClose && infoModal) {
-    modalClose.addEventListener('click', () => {
-        infoModal.classList.remove('active');
-    });
-}
-
-if (infoModal) {
-    infoModal.addEventListener('click', (e) => {
-        if (e.target === infoModal) {
-            infoModal.classList.remove('active');
-        }
-    });
+    updateConvertButtonState();
 }
 
 // Функция отображения файлов
 function displayFiles(groups) {
-    if (!fileList) return;
-    
-    console.log('[DISPLAY] Отображение файлов:', groups);
-    
     fileList.innerHTML = '';
-    
-    if (filesContainer) {
-        filesContainer.style.display = 'block';
-    }
-    
-    const groupNames = Object.keys(groups);
-    if (groupNames.length > 0) {
-        if (groupsCountSpan) {
-            groupsCountSpan.textContent = groupNames.length.toString();
-        }
-        if (groupsInfo) {
-            groupsInfo.style.display = 'block';
-        }
-    }
     
     for (const [groupName, files] of Object.entries(groups)) {
         const groupItem = document.createElement('div');
         const displayName = groupName.replace(/_/g, ' ');
-        groupItem.innerHTML = `<img src="file://${files[0].path}" class="tiny-preview" alt="prev"> ${displayName} <span class="muted">(${files.length})</span>`;
+        
+        // Создаем превью для группы (используем первый файл)
+        const previewImg = document.createElement('img');
+        previewImg.src = `file://${files[0].path}`;
+        previewImg.className = 'tiny-preview';
+        previewImg.alt = 'preview';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = `${displayName} `;
+        
+        const countSpan = document.createElement('span');
+        countSpan.className = 'muted';
+        countSpan.textContent = `(${files.length})`;
+        
+        groupItem.appendChild(previewImg);
+        groupItem.appendChild(textSpan);
+        groupItem.appendChild(countSpan);
+        
         fileList.appendChild(groupItem);
     }
 }
 
-// Конвертация в GIF с улучшенной отчетностью
-if (convertButton) {
-    convertButton.addEventListener('click', async () => {
-        console.log('[CONVERT] Начало конвертации');
-        
-        if (!selectedDirectory) {
-            showStatus('Сначала выберите папку', 'error');
-            return;
-        }
-        
-        const frameDelaySeconds = parseFloat(frameDelayInput?.value || 0.1);
-        const maxKb = parseInt(maxSizeSelect?.value || '500');
-        
-        if (isNaN(frameDelaySeconds) || frameDelaySeconds < 0.01) {
-            showStatus('Пожалуйста, введите корректную задержку между кадрами (минимум 0.01 сек)', 'error');
-            return;
-        }
-        
-        convertButton.disabled = true;
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressText.textContent = 'Подготовка...';
-        
-        // ДОБАВЛЯЕМ ВРЕМЯ НАЧАЛА СЕССИИ
-        const sessionStartTime = new Date();
-        
-        let totalGroups = Object.keys(groupedFiles).length;
-        let completedGroups = 0;
-        conversionResults = [];
-        let sessionLog = [`Сессия конвертации запущена: ${new Date().toISOString()}`];
-        
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const sessionOutputDir = await window.electronAPI.pathJoin(selectedDirectory, `Результаты конвертации - ${timestamp}`);
-        
-        try {
-            for (const [groupName, files] of Object.entries(groupedFiles)) {
-                console.log(`[CONVERT] Конвертация группы: ${groupName}`);
-                
-                if (progressText) {
-                    progressText.textContent = `Конвертируется группа: ${groupName}...`;
-                }
-                
-                try {
-                    const result = await window.electronAPI.convertToGif({
-                        groupName: groupName,
-                        files: files,
-                        outputDir: selectedDirectory,
-                        frameDelay: frameDelaySeconds,
-                        maxKb: maxKb,
-                        sessionOutputDir: sessionOutputDir,
-                    });
-
-                    // Сохраняем полный результат
-                    conversionResults.push(result);
-                    // Добавляем логи группы в общий лог сессии
-                    if(result.logMessages) {
-                        sessionLog.push(...result.logMessages);
-                    }
-                    
-                    if (result.success) {
-                        completedGroups++;
-                        updateProgress(completedGroups, totalGroups);
-                        console.log(`[CONVERT] Группа ${groupName} сконвертирована успешно`);
-                    } else {
-                        console.error(`[CONVERT] Ошибка конвертации группы ${groupName}:`, result.error);
-                        showStatus(`Ошибка при конвертации группы ${groupName}: ${result.error}`, 'error');
-                    }
-                } catch (groupError) {
-                    console.error(`[CONVERT] Исключение при конвертации группы ${groupName}:`, groupError);
-                    showStatus(`Ошибка при конвертации группы ${groupName}: ${groupError.message}`, 'error');
-                }
-            }
-            
-            if (completedGroups === totalGroups && completedGroups > 0) {
-                showStatus(`Успешно сконвертировано ${completedGroups} групп файлов!`, 'success');
-            } else if (completedGroups > 0) {
-                showStatus(`Сконвертировано ${completedGroups} из ${totalGroups} групп`, 'warning');
-            } else {
-                showStatus('Не удалось сконвертировать ни одной группы', 'error');
-            }
-            displayResults();
-
-            // УЛУЧШЕННАЯ СИСТЕМА СОХРАНЕНИЯ ОТЧЕТА
-            if (sessionOutputDir && conversionResults.length > 0) {
-                const finalReport = generateDetailedReport(conversionResults, sessionLog, {
-                    sessionStart: sessionStartTime,
-                    sessionEnd: new Date(),
-                    totalGroups: totalGroups,
-                    completedGroups: completedGroups,
-                    selectedDirectory: selectedDirectory,
-                    settings: {
-                        frameDelay: frameDelaySeconds,
-                        maxKb: maxKb
-                    }
-                });
-                
-                const saveResult = await window.electronAPI.saveLog({
-                    logContent: finalReport,
-                    directory: sessionOutputDir
-                });
-                
-                if (saveResult && saveResult.success) {
-                    console.log('[REPORT] Детальный отчет сохранен:', saveResult.reportPath);
-                    console.log('[REPORT] Краткий отчет сохранен:', saveResult.summaryPath);
-                }
-            }
-
-        } catch (error) {
-            console.error('[CONVERT] Критическая ошибка конвертации:', error);
-            showStatus(`Критическая ошибка конвертации: ${error.message}`, 'error');
-        } finally {
-            if (progressContainer) {
-                progressContainer.style.display = 'none';
-            }
-            convertButton.disabled = false;
-        }
-    });
-}
-
-// Отображение результатов
+// Функция отображения результатов
 function displayResults() {
-    if (!resultsGrid) return;
+    const successfulResults = conversionResults.filter(r => r.success);
+    resultsTitle.textContent = `Сконвертировано ${successfulResults.length} гифов`;
     
     resultsGrid.innerHTML = '';
     
-    conversionResults.forEach(result => {
-        const card = document.createElement('div');
-        card.className = 'result-card';
+    successfulResults.forEach(result => {
+        const resultCard = document.createElement('div');
+        resultCard.className = 'result-card';
         
-        if (result.success) {
-            card.innerHTML = `
-                <img src="file://${result.path}?t=${new Date().getTime()}" alt="${result.groupName}">
-                <div class="result-info">
-                    <p><strong>${result.groupName}</strong></p>
-                    <p>Размер: ${(result.size / 1024).toFixed(1)} КБ</p>
-                    <p>Размеры: ${result.dimensions.width}x${result.dimensions.height}</p> 
-                    <p>Качество: ${result.quality || 'N/A'}</p>
-                </div>
-                <div class="result-actions">
-                    <button class="action-btn show-in-folder-btn">Показать в проводнике</button>
-                </div>
-            `;
-
-            card.querySelector('.show-in-folder-btn').addEventListener('click', () => {
-                window.electronAPI.showItemInFolder(result.path);
-            });
-
-        } else {
-            card.classList.add('error');
-            card.innerHTML = `
-                <div class="result-info">
-                    <p><strong>${result.groupName}</strong></p>
-                    <p class="error-message">Ошибка: ${result.error || 'Неизвестная ошибка'}</p>
-                </div>
-            `;
-        }
-
-        resultsGrid.appendChild(card);
+        const preview = document.createElement('div');
+        preview.className = 'result-preview';
+        
+        // Создаем изображение превью
+        const img = document.createElement('img');
+        img.src = result.gifPath || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkdJRjwvdGV4dD48L3N2Zz4=';
+        img.alt = result.groupName;
+        preview.appendChild(img);
+        
+        const info = document.createElement('div');
+        info.className = 'result-info';
+        
+        const name = document.createElement('div');
+        name.className = 'result-name';
+        name.textContent = result.groupName;
+        
+        const details = document.createElement('div');
+        details.className = 'result-details';
+        
+        const sizeDetail = document.createElement('div');
+        sizeDetail.className = 'result-detail';
+        sizeDetail.textContent = `Вес: ${Math.round((result.outputSize || 0) / 1024)} Кб`;
+        
+        const colorDetail = document.createElement('div');
+        colorDetail.className = 'result-detail';
+        colorDetail.textContent = `Цвета: ${result.colors || 'auto'}`;
+        
+        const durationDetail = document.createElement('div');
+        durationDetail.className = 'result-detail';
+        durationDetail.textContent = `Длительность: ${result.duration || 'auto'} сек`;
+        
+        details.appendChild(sizeDetail);
+        details.appendChild(colorDetail);
+        details.appendChild(durationDetail);
+        
+        info.appendChild(name);
+        info.appendChild(details);
+        
+        resultCard.appendChild(preview);
+        resultCard.appendChild(info);
+        
+        resultsGrid.appendChild(resultCard);
     });
+}
+
+// Функция генерации отчета
+function generateReport(results, settings, sessionInfo) {
+    const { sessionStart, sessionEnd, selectedDirectory } = sessionInfo;
+    const duration = Math.round((sessionEnd - sessionStart) / 1000);
+    const successfulConversions = results.filter(r => r.success).length;
+    const totalInputFiles = results.reduce((sum, r) => sum + (r.inputFilesCount || 0), 0);
+    const totalOutputSize = results.reduce((sum, r) => sum + (r.outputSize || 0), 0);
     
-    if (mainPage) mainPage.classList.remove('active');
-    if (resultsPage) resultsPage.classList.add('active');
+    let report = '';
+    report += '╔══════════════════════════════════════════════════════════════════════════════╗\n';
+    report += '║                            ОТЧЕТ О КОНВЕРТАЦИИ                              ║\n';
+    report += '║                        PNG → GIF Конвертер                                  ║\n';
+    report += '╚══════════════════════════════════════════════════════════════════════════════╝\n\n';
+    
+    report += '┌─ ИНФОРМАЦИЯ О СЕССИИ ────────────────────────────────────────────────────────┐\n';
+    report += `│ 📅 Дата начала: ${sessionStart.toLocaleString()}\n`;
+    report += `│ 🏁 Дата окончания: ${sessionEnd.toLocaleString()}\n`;
+    report += `│ ⏱️  Продолжительность: ${duration} сек\n`;
+    report += `│ 📁 Исходная папка: ${selectedDirectory}\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    
+    report += '┌─ НАСТРОЙКИ КОНВЕРТАЦИИ ──────────────────────────────────────────────────────┐\n';
+    report += `│ ⏰ Задержка между кадрами: ${settings.frameDelay} сек\n`;
+    report += `│ 📏 Максимальный размер файла: ${settings.maxKb} КБ\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    
+    report += '┌─ СТАТИСТИКА РЕЗУЛЬТАТОВ ─────────────────────────────────────────────────────┐\n';
+    report += `│ 📊 Всего групп для обработки: ${Object.keys(groupedFiles || {}).length}\n`;
+    report += `│ ✅ Успешно сконвертировано: ${successfulConversions}\n`;
+    report += `│ 🖼️  Общее количество входных файлов: ${totalInputFiles}\n`;
+    report += `│ 💽 Общий размер результатов: ${Math.round(totalOutputSize / 1024)} КБ\n`;
+    report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    
+    if (successfulConversions > 0) {
+        report += '┌─ СГЕНЕРИРОВАННЫЕ GIF ФАЙЛЫ ──────────────────────────────────────────────────┐\n';
+        results.filter(r => r.success).forEach((result, index) => {
+            const prefix = index === successfulConversions - 1 ? '└─' : '├─';
+            report += `│ ${prefix} 🎬 ${result.groupName}.gif\n`;
+            report += `│ │  ├─ 💽 Размер файла: ${Math.round((result.outputSize || 0) / 1024)} КБ\n`;
+            report += `│ │  ├─ 🖼️  Входных изображений: ${result.inputFilesCount || 0}\n`;
+            if (index < successfulConversions - 1) {
+                report += `│ │  └─ ⭐ Качество: Высокое\n│ │\n`;
+            } else {
+                report += `│ └─ ⭐ Качество: Высокое\n`;
+            }
+        });
+        report += '└──────────────────────────────────────────────────────────────────────────────┘\n\n';
+    }
+    
+    report += `📝 Отчет сгенерирован: ${new Date().toLocaleString()}\n`;
+    report += `🔧 PNG → GIF Конвертер v2.0\n`;
+    
+    return report;
 }
 
-// Обновление прогресса
-function updateProgress(current, total) {
-    const percentage = Math.round((current / total) * 100);
-    progressBar.style.width = `${percentage}%`;
-    progressText.textContent = `Выполнено: ${current} из ${total} (${percentage}%)`;
-}
+// Обработчики событий
 
-// Глобальная обработка ошибок
-window.addEventListener('error', (event) => {
-    console.error('[GLOBAL ERROR]', event.error);
-    showStatus(`Глобальная ошибка: ${event.error.message}`, 'error');
-});
-
-window.addEventListener('unhandledrejection', (event) => {
-    console.error('[UNHANDLED PROMISE REJECTION]', event.reason);
-    showStatus(`Необработанная ошибка: ${event.reason}`, 'error');
-});
-
-console.log('[RENDERER] Скрипт renderer.js загружен полностью');
-
-// Обработчик открытия папки с результатами
-if (openOutputFolderBtn) {
-    openOutputFolderBtn.addEventListener('click', () => {
-        const firstSuccessfulResult = conversionResults.find(r => r.success && r.outputDir);
-        if (firstSuccessfulResult) {
-            // outputDir теперь указывает на общую папку 'gif_conversions'
-            window.electronAPI.openPath(firstSuccessfulResult.outputDir);
-        } else if (selectedDirectory) {
-            // Фоллбэк, если ничего не сконвертировано
-            window.electronAPI.openPath(selectedDirectory);
+// Выбор директории
+selectDirectoryButton.addEventListener('click', async () => {
+    try {
+        console.log('[DIR] Открытие диалога выбора папки...');
+        
+        if (!window.electronAPI || !window.electronAPI.openDirectoryDialog) {
+            showStatus('Ошибка: API недоступен', 'error');
+            return;
         }
-    });
-}
+        
+        const result = await window.electronAPI.openDirectoryDialog();
+        
+        if (result.canceled) {
+            console.log('[DIR] Выбор папки отменен');
+            return;
+        }
+
+        selectedDirectory = result.filePaths[0];
+        console.log('[DIR] Выбрана папка:', selectedDirectory);
+
+        // Группируем файлы
+        console.log('[GROUP] Группировка PNG файлов...');
+        const groupingResult = await window.electronAPI.groupPngFiles(selectedDirectory);
+        
+        if (!groupingResult.success) {
+            showStatus(`Ошибка: ${groupingResult.error}`, 'error');
+            return;
+        }
+        
+        groupedFiles = groupingResult.groupedFiles;
+        console.log('[GROUP] Найдено групп:', Object.keys(groupedFiles).length);
+        
+        updateUIAfterDirectorySelection();
+        showStatus(`Папка выбрана. Найдено ${Object.keys(groupedFiles).length} групп файлов.`, 'success');
+        
+    } catch (error) {
+        console.error('[DIR] Ошибка выбора директории:', error);
+        showStatus(`Ошибка выбора папки: ${error.message}`, 'error');
+    }
+});
+
+// Сброс настроек
+resetSettingsBtn.addEventListener('click', () => {
+    console.log('[RESET] Сброс настроек');
+    
+    frameDelayInput.value = defaultConfig.frameDelay;
+    maxSizeInput.value = defaultConfig.maxKb;
+    
+    selectDirectoryButton.classList.remove('chosen');
+    chooseSub.textContent = 'Выбери папку в которой есть изображения';
+    groupsInfo.style.display = 'none';
+    fileList.style.display = 'none';
+    fileList.innerHTML = '';
+    
+    selectedDirectory = null;
+    groupedFiles = {};
+    conversionResults = [];
+    
+    updateConvertButtonState();
+    showStatus('Настройки сброшены', 'info');
+});
+
+// Конвертация
+convertButton.addEventListener('click', async () => {
+    if (!selectedDirectory || Object.keys(groupedFiles).length === 0) {
+        showStatus('Выберите папку с PNG файлами', 'error');
+        return;
+    }
+
+    const frameDelay = parseFloat(frameDelayInput.value);
+    const maxKb = parseInt(maxSizeInput.value);
+
+    if (isNaN(frameDelay) || frameDelay <= 0) {
+        showStatus('Введите корректную длину кадра', 'error');
+        return;
+    }
+    
+    if (isNaN(maxKb) || maxKb < 510) {
+        showStatus('Минимальный вес должен быть не менее 510 Кб', 'error');
+        return;
+    }
+
+    // Запускаем конвертацию
+    console.log('[CONVERT] Начало конвертации');
+    const sessionStart = new Date();
+    
+    convertButton.disabled = true;
+    progressContainer.style.display = 'block';
+    progressText.textContent = 'Подготовка к конвертации...';
+    progressBar.style.width = '0%';
+
+    try {
+        const totalGroups = Object.keys(groupedFiles).length;
+        let currentGroup = 0;
+
+        const settings = { frameDelay, maxKb };
+        
+        // Имитируем процесс конвертации с прогрессом
+        conversionResults = [];
+        
+        for (const [groupName, files] of Object.entries(groupedFiles)) {
+            currentGroup++;
+            const progressPercent = (currentGroup / totalGroups) * 100;
+            
+            progressBar.style.width = `${progressPercent}%`;
+            progressText.textContent = `Конвертация группы ${currentGroup} из ${totalGroups}`;
+            detailStatus.textContent = `Обработка: ${groupName}`;
+            
+            console.log(`[CONVERT] Группа ${currentGroup}/${totalGroups}: ${groupName}`);
+            
+            try {
+                // Вызываем реальную конвертацию через electronAPI
+                const result = await window.electronAPI.convertGroup({
+                    groupName,
+                    files,
+                    settings,
+                    outputDirectory: selectedDirectory
+                });
+                
+                // Используем реальный результат от conversion service
+                if (result.success) {
+                    conversionResults.push({
+                        success: true,
+                        groupName,
+                        outputSize: result.outputSize || 0,
+                        inputFilesCount: result.inputFilesCount || files.length,
+                        colors: result.colorCount || 'auto',
+                        duration: result.duration || (files.length * frameDelay).toFixed(1),
+                        gifPath: result.outputPath
+                    });
+                } else {
+                    conversionResults.push({
+                        success: false,
+                        groupName,
+                        error: result.error || 'Неизвестная ошибка конвертации'
+                    });
+                }
+                
+            } catch (error) {
+                console.error(`[CONVERT] Ошибка конвертации группы ${groupName}:`, error);
+                conversionResults.push({
+                    success: false,
+                    groupName,
+                    error: error.message
+                });
+            }
+            
+            // Небольшая задержка для плавности анимации
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        const sessionEnd = new Date();
+        
+        // Генерируем отчет
+        const reportContent = generateReport(conversionResults, settings, {
+            sessionStart,
+            sessionEnd,
+            selectedDirectory
+        });
+        
+        // Сохраняем отчет
+        await window.electronAPI.saveReport(reportContent, sessionStart, selectedDirectory);
+        
+        // Переходим на страницу результатов
+        mainPage.classList.remove('active');
+        resultsPage.classList.add('active');
+        displayResults();
+        
+        const successCount = conversionResults.filter(r => r.success).length;
+        showStatus(`Конвертация завершена! Успешно: ${successCount} из ${totalGroups}`, 'success');
+        
+    } catch (error) {
+        console.error('[CONVERT] Общая ошибка конвертации:', error);
+        showStatus(`Ошибка конвертации: ${error.message}`, 'error');
+    } finally {
+        progressContainer.style.display = 'none';
+        convertButton.disabled = false;
+    }
+});
+
+// Открытие папки результатов
+openOutputFolderBtn.addEventListener('click', async () => {
+    try {
+        if (selectedDirectory) {
+            await window.electronAPI.openOutputFolder(selectedDirectory);
+        } else {
+            showStatus('Папка не выбрана', 'error');
+        }
+    } catch (error) {
+        console.error('[FOLDER] Ошибка открытия папки:', error);
+        showStatus(`Ошибка открытия папки: ${error.message}`, 'error');
+    }
+});
+
+// Модальное окно помощи
+groupsHelpButton.addEventListener('click', () => {
+    infoModal.classList.add('active');
+});
+
+modalClose.addEventListener('click', () => {
+    infoModal.classList.remove('active');
+});
+
+infoModal.addEventListener('click', (e) => {
+    if (e.target === infoModal) {
+        infoModal.classList.remove('active');
+    }
+});
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('[INIT] Инициализация приложения');
+    
+    // Устанавливаем значения по умолчанию
+    frameDelayInput.value = defaultConfig.frameDelay;
+    maxSizeInput.value = defaultConfig.maxKb;
+    
+    updateConvertButtonState();
+    
+    console.log('[INIT] Приложение готово к работе');
+});

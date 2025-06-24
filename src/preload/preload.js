@@ -38,14 +38,20 @@ const electronAPI = {
     },
     
     // Выбор директории
-    chooseDirectory: () => {
-        console.log('[PRELOAD] Вызов chooseDirectory');
+    openDirectoryDialog: () => {
+        console.log('[PRELOAD] Вызов openDirectoryDialog');
         return safeIpcInvoke('choose-directory');
     },
     
-    // Получение списка PNG файлов
-    getPngFiles: (directoryPath) => {
-        console.log('[PRELOAD] Вызов getPngFiles с путем:', directoryPath);
+    // Конвертация одной группы
+    convertGroup: (options) => {
+        console.log('[PRELOAD] Вызов convertGroup с опциями:', options);
+        return safeIpcInvoke('convert-group', options);
+    },
+    
+    // Получение списка PNG файлов и их группировка
+    groupPngFiles: (directoryPath) => {
+        console.log('[PRELOAD] Вызов groupPngFiles с путем:', directoryPath);
         if (!directoryPath || typeof directoryPath !== 'string') {
             return Promise.reject(new Error('Неверный путь к директории'));
         }
@@ -57,13 +63,13 @@ const electronAPI = {
         return safeIpcInvoke('path-join', ...args);
     },
     
-    // Конвертация в GIF
-    convertToGif: (options) => {
-        console.log('[PRELOAD] Вызов convertToGif с опциями:', options);
+    // Запуск всей конвертации
+    startConversion: (options) => {
+        console.log('[PRELOAD] Вызов startConversion с опциями:', options);
         if (!options || typeof options !== 'object') {
             return Promise.reject(new Error('Неверные параметры конвертации'));
         }
-        return safeIpcInvoke('convert-to-gif', options);
+        return safeIpcInvoke('start-conversion', options);
     },
     
     // Получение конфигурации
@@ -73,18 +79,18 @@ const electronAPI = {
     },
     
     // Открытие папки в файловом менеджере
-    openFolder: (folderPath) => {
-        console.log('[PRELOAD] Вызов openFolder с путем:', folderPath);
+    openOutputFolder: (folderPath) => {
+        console.log('[PRELOAD] Вызов openOutputFolder с путем:', folderPath);
         if (!folderPath || typeof folderPath !== 'string') {
             return Promise.reject(new Error('Неверный путь к папке'));
         }
-        return safeIpcInvoke('open-folder', folderPath);
+        return safeIpcInvoke('open-output-folder', folderPath);
     },
     
-    // Сохранение лога
-    saveLog: (logData) => {
-        console.log('[PRELOAD] Вызов saveLog');
-        return safeIpcInvoke('save-log', logData);
+    // Сохранение отчета
+    saveReport: (logContent, sessionStart, selectedDirectory) => {
+        console.log('[PRELOAD] Вызов saveReport');
+        return safeIpcInvoke('save-report', logContent, sessionStart, selectedDirectory);
     },
     
     // Методы для диагностики

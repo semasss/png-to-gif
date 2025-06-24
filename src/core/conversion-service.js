@@ -148,7 +148,7 @@ function getPngFiles(directory) {
             });
         }
 
-        return { success: true, groups };
+        return { success: true, files: imageFiles.map(file => path.join(directory, file)), groupedFiles: groups };
     } catch (error) {
         console.error('Error getting image files:', error);
         return { success: false, error: error.message };
@@ -204,7 +204,11 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
     const { frameDelay = 3, maxKb = 500 } = settings;
     const maxBytes = maxKb * 1024;
     const finalOutputPath = path.join(outputDir, `${groupName}.gif`);
-    const log = (message) => console.log(`[${groupName}] ${message}`);
+    const logMessages = [];
+    const log = (message) => {
+        console.log(`[${groupName}] ${message}`);
+        logMessages.push(message);
+    };
 
     const cleanupFiles = (...files) => {
         files.forEach(file => {
@@ -213,8 +217,13 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
     };
 
     try {
-        log('Шаг 1/5: Нормализация размеров кадров...');
+        log('Шаг 1/5: Нормализация размеров кадров и проверка наличия инструментов...');
         const imagePaths = pngFilePaths.map(f => f.path);
+
+        if (imagePaths.length === 0) {
+            throw new Error('Нет изображений для конвертации в группе.');
+        }
+
         const baseImage = await Image.load(imagePaths[0]);
         const { width, height } = baseImage;
 
@@ -227,12 +236,6 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
             }
         }
 
-        const targetBpp = maxBytes / (width * height * imagePaths.length);
-        log(`Целевой "бюджет": ${targetBpp.toFixed(3)} байт/пиксель.`);
-        if (targetBpp < 0.05) {
-            log('[ПРЕДУПРЕЖДЕНИЕ] Бюджет крайне мал. Может потребоваться значительное сжатие или уменьшение разрешения.');
-        }
-
         const gifskiPath = getToolPath('gifski');
         const optimizerPath = getToolPath(['giflossy', 'gifsicle']);
 
@@ -240,107 +243,117 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
             throw new Error('Ключевые утилиты (gifski, gifsicle/giflossy) не найдены.');
         }
 
-        log('Шаг 2/5: Создание "золотого" GIF (качество 100%)...');
-        const rawGifPath = path.join(outputDir, `${groupName}_raw.gif`);
-        await runCommand('gifski', gifskiPath, [
-            '--fps', '60',
-            '--quality', '100',
-            '--width', width,
-            '--height', height,
-            '-o', rawGifPath,
+        log('Шаг 2/5: Создание GIF с помощью gifski...');
+        // Создаём GIF с помощью gifski с поддерживаемыми флагами
+        const gifskiArgs = [
+            '--fps', Math.min(frameDelay * 10, 60).toString(), // Конвертируем в FPS
+            '--quality', '90',
+            '--width', width.toString(),
+            '--height', height.toString(),
+            '--motion-quality', '90',
+            '--no-sort',
+            '-o', finalOutputPath,
             ...imagePaths
-        ]);
+        ];
+        await runCommand('gifski', gifskiPath, gifskiArgs);
+        log(`  - GIF создан: ${finalOutputPath}`);
 
-        const gifsicleDelay = Math.max(2, Math.round(frameDelay * 100));
-        let optimizedPath = path.join(outputDir, `${groupName}_optimized.gif`);
-        
-        const testSize = async (filePath) => {
-            const stats = fs.statSync(filePath);
-            const isOk = stats.size <= maxBytes;
-            log(`  -> ${isOk ? '✔' : '✖'} ${(stats.size / 1024).toFixed(0)} KB / ${maxKb} KB`);
-            return isOk;
-        };
-        
-        // --- Фаза A: Бинарный поиск по палитре ---
-        log('Шаг 3/5: Поиск оптимальной палитры (gifsicle --colors)...');
-        const colorLevels = [32, 48, 64, 96, 128, 256];
-        let bestColors = await binarySearchDiscrete(colorLevels, async (numColors) => {
-            log(`  - Пробуем colors=${numColors}...`);
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', numColors, rawGifPath, '--output', optimizedPath]);
-            return await testSize(optimizedPath);
-        }, true);
-
-        if (bestColors) {
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', '--colors', bestColors, '--delay', gifsicleDelay, rawGifPath, '--output', finalOutputPath]);
-            if (await testSize(finalOutputPath)) {
-                log('Успех! Уложились в лимит размером палитры.');
-                cleanupFiles(rawGifPath, optimizedPath);
-                const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors}` };
-            }
-        }
-        
-        // --- Фаза B: Бинарный поиск по потерям ---
-        log('Шаг 4/5: Поиск оптимального сжатия с потерями (gifsicle --lossy)...');
-        const lossyLevels = Array.from({length: 18}, (_, i) => 20 + i * 10); // [20, 30... 190, 200]
-        const colorsArg = bestColors ? ['--colors', bestColors] : [];
-
-        let bestLossy = await binarySearchDiscrete(lossyLevels, async (lossy) => {
-            log(`  - Пробуем lossy=${lossy}...`);
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${lossy}`, rawGifPath, '--output', optimizedPath]);
-            return await testSize(optimizedPath);
-        }, false); // Ищем минимальное подходящее значение
-
-        if (bestLossy) {
-            await runCommand('gifsicle', optimizerPath, ['-O3', '--dither', ...colorsArg, `--lossy=${bestLossy}`, '--delay', gifsicleDelay, rawGifPath, '--output', finalOutputPath]);
-             if (await testSize(finalOutputPath)) {
-                log('Успех! Уложились в лимит с lossy-сжатием.');
-                cleanupFiles(rawGifPath, optimizedPath);
-                const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors||256}, lossy=${bestLossy}` };
-            }
-        }
-        
-        // --- Фаза C: Масштабирование как крайняя мера ---
-        log('Шаг 5/5: Не удалось уложиться. Пробуем уменьшить разрешение...');
-        const currentStats = fs.statSync(bestLossy ? finalOutputPath : rawGifPath);
-        const scaleFactor = Math.sqrt(maxBytes / currentStats.size);
-
-        if (scaleFactor < 0.95) {
-            const newWidth = Math.floor(width * scaleFactor);
-            log(`  - Уменьшаем до ${newWidth}px по ширине (k=${scaleFactor.toFixed(2)})...`);
-            const finalArgs = [
-                '-O3',
-                '--dither',
-                ...colorsArg,
-                bestLossy ? `--lossy=${bestLossy}` : '',
-                '--delay', gifsicleDelay,
-                '--scale', `${scaleFactor.toFixed(3)}`,
-                rawGifPath,
-                '--output', finalOutputPath
-            ].filter(Boolean);
-
-            await runCommand('gifsicle', optimizerPath, finalArgs);
-
-            if (await testSize(finalOutputPath)) {
-                 log('Успех! Уложились в лимит после уменьшения разрешения.');
-                cleanupFiles(rawGifPath, optimizedPath);
-                const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: Math.floor(height*scaleFactor) }, quality: `scaled` };
+        // Проверка размера после gifski
+        let gifskiStats = fs.statSync(finalOutputPath);
+        if (gifskiStats.size > maxBytes) {
+            log(`[ПРЕДУПРЕЖДЕНИЕ] GIF превысил максимальный размер! Размер: ${Math.round(gifskiStats.size / 1024)} КБ (макс: ${maxKb} КБ). Попытка уменьшения качества...`);
+            
+            // Попробуем снизить качество до приемлемого размера
+            const qualityLevels = [70, 50, 30, 20];
+            let currentQuality = 90;
+            
+            for (const quality of qualityLevels) {
+                const tempPath = path.join(outputDir, `${groupName}_temp_${quality}.gif`);
+                const retryArgs = [
+                    '--fps', Math.min(frameDelay * 10, 60).toString(),
+                    '--quality', quality.toString(),
+                    '--width', width.toString(),
+                    '--height', height.toString(),
+                    '--motion-quality', quality.toString(),
+                    '--no-sort',
+                    '-o', tempPath,
+                    ...imagePaths
+                ];
+                
+                try {
+                    await runCommand('gifski', gifskiPath, retryArgs);
+                    const tempStats = fs.statSync(tempPath);
+                    
+                    if (tempStats.size <= maxBytes) {
+                        log(`  - Удалось уменьшить размер с качеством ${quality}: ${Math.round(tempStats.size / 1024)} КБ`);
+                        cleanupFiles(finalOutputPath);
+                        fs.renameSync(tempPath, finalOutputPath);
+                        currentQuality = quality;
+                        break;
+                    } else {
+                        cleanupFiles(tempPath);
+                        log(`  - Качество ${quality} всё ещё даёт большой размер: ${Math.round(tempStats.size / 1024)} КБ`);
+                    }
+                } catch (retryError) {
+                    log(`  - Ошибка при попытке качества ${quality}: ${retryError.message}`);
+                    cleanupFiles(tempPath);
+                }
             }
         }
 
-        cleanupFiles(rawGifPath, optimizedPath, finalOutputPath);
-        throw new Error(`Не удалось сжать файл до ${maxKb} KB даже с максимальными настройками.`);
-
-    } catch (error) {
-        log(`[КРИТИЧЕСКАЯ ОШИБКА] ${error.message}`);
-        cleanupFiles(
-            path.join(outputDir, `${groupName}_raw.gif`),
-            path.join(outputDir, `${groupName}_optimized.gif`),
+        log('Шаг 3/5: Оптимизация GIF с помощью gifsicle...');
+        // Оптимизация и установка задержки кадров
+        const tempOptimizedPath = path.join(outputDir, `${groupName}_optimized.gif`);
+        await runCommand('gifsicle', optimizerPath, [
+            '--optimize=3',
+            '--delay', (frameDelay * 100).toString(), // Задержка в сотых долях секунды
+            '--output', tempOptimizedPath,
             finalOutputPath
-        );
-        return { success: false, error: error.message, groupName };
+        ]);
+        log(`  - GIF оптимизирован: ${tempOptimizedPath}`);
+        cleanupFiles(finalOutputPath); // Удаляем исходный GIF после оптимизации
+        fs.renameSync(tempOptimizedPath, finalOutputPath);
+
+        log('Шаг 4/5: Получение метаданных GIF...');
+        // Получение информации о цвете и длительности
+        const infoOutput = await runCommand('gifsicle', optimizerPath, [
+            '--info',
+            finalOutputPath
+        ]);
+        const colorMatch = infoOutput.stdout.match(/\d+ colors in palette/);
+        const colorCount = colorMatch ? parseInt(colorMatch[0].split(' ')[0]) : 'N/A';
+
+        // Длительность = количество кадров * задержка кадра
+        const duration = (imagePaths.length * frameDelay).toFixed(1);
+
+        log('Шаг 5/5: Завершение.');
+        const finalStats = fs.statSync(finalOutputPath);
+        const outputSize = finalStats.size;
+        
+        log(`  - Итоговый размер: ${outputSize / 1024} КБ`);
+        log(`  - Количество цветов: ${colorCount}`);
+        log(`  - Длительность: ${duration} сек`);
+        log(`  - Группа ${groupName} успешно сконвертирована.`);
+
+        return {
+            success: true,
+            groupName: groupName,
+            outputPath: finalOutputPath,
+            outputSize: outputSize,
+            inputFilesCount: imagePaths.length,
+            colorCount: colorCount, // Добавлены цвета
+            duration: parseFloat(duration), // Добавлена длительность
+            logMessages: logMessages,
+        };
+    } catch (error) {
+        log(`Ошибка конвертации группы ${groupName}: ${error.message}`);
+        cleanupFiles(finalOutputPath, path.join(outputDir, `${groupName}_raw.gif`), path.join(outputDir, `${groupName}_optimized.gif`));
+        return {
+            success: false,
+            groupName: groupName,
+            error: error.message,
+            logMessages: logMessages,
+        };
     }
 }
 

@@ -17,10 +17,17 @@
       <section class="card data-card">
         <h2 class="card-title">Данные</h2>
         <p class="subtitle" id="choose-sub">Выбери папку в которой есть изображения</p>
-        <button id="choose-directory" class="choose-btn">Выбор папки <span class="arrow">›</span></button>
-        <p id="directory-display" class="path-display" style="display:none;"></p>
-        <p id="groups-info" class="groups-info" style="display:none;">В папке нашлось <span id="groups-count"></span> групп <button id="groups-help" class="help-pill">что это?</button></p>
-        <div id="file-list" class="groups-list"></div>
+        <div class="directory-selection-wrapper">
+          <button id="select-directory-button" class="choose-btn">
+            <span>Выбор папки</span> 
+            <span class="arrow">›</span>
+          </button>
+        </div>
+        <p id="groups-info" class="groups-info" style="display:none;">
+          В папке нашлось <span id="groups-count"></span> групп 
+          <button id="groups-help" class="help-pill groups-help-button">что это?</button>
+        </p>
+        <div id="file-list" class="groups-list" style="display:none;"></div>
       </section>
 
       <!-- Карточка Настройки -->
@@ -35,14 +42,14 @@
             <input type="number" id="frame-delay" value="3" min="0.01" step="0.1" placeholder="3 сек">
           </div>
           <div class="setting-col">
-            <label for="color-count">Количество цветов</label>
-            <select id="color-count">
-              <option value="256">256</option>
-              <option value="128">128</option>
-            </select>
+            <label for="max-size">Максимальный вес</label>
+            <input type="number" id="max-size" value="510" min="1" placeholder="510 Кб">
           </div>
         </div>
-        <button id="convert-button" class="convert-btn" disabled>Жмахнуть ЖИФ <span class="arrow">›</span></button>
+        <button id="convert-button" class="convert-btn" disabled>
+          <span>Жмахнуть ЖИФ</span>
+          <span class="arrow">›</span>
+        </button>
         <div id="progress-container" style="display: none; margin-top: 24px;">
           <div class="progress-bar-background">
             <div id="progress" class="progress-bar-foreground"></div>
@@ -56,11 +63,11 @@
     <!-- Страница результатов -->
     <div id="results-page" class="page">
       <div class="results-header">
-        <h2>Результаты</h2>
-        <div class="results-actions">
-          <button id="back-to-main" class="button secondary">Назад</button>
-          <button id="open-output-folder-button" class="button">Открыть папку</button>
-        </div>
+        <h2 id="results-title">Сконвертировано 5 гифов</h2>
+        <button id="open-output-folder-button" class="button">
+          <span>Открыть папку</span>
+          <span class="arrow">›</span>
+        </button>
       </div>
       <div id="results-grid" class="result-grid"></div>
     </div>
@@ -69,8 +76,8 @@
     <div id="info-modal" class="modal">
       <div class="modal-content">
         <span class="modal-close">×</span>
-        <h3>Как это работает?</h3>
-        <p>Программа ищет PNG-файлы в выбранной папке, группирует их и превращает каждую группу в отдельный GIF при помощи <a href="https://gif.ski/" target="_blank">gifski</a>.</p>
+        <h3>Что это?</h3>
+        <p>Это 2 и более файла png, конвертер автоматически объединяет их в группы по названию. Группы — это будущие гифки.</p>
       </div>
     </div>
   </div>

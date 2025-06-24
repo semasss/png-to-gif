@@ -79,10 +79,7 @@ ipcMain.handle('choose-directory', async () => {
         properties: ['openDirectory']
     });
     
-    if (!result.canceled) {
-        return { success: true, path: result.filePaths[0] };
-    }
-    return { success: false, error: 'Директория не выбрана' };
+    return result;
 });
 
 ipcMain.handle('check-tools', async () => {
@@ -96,19 +93,67 @@ ipcMain.handle('get-gif-info', async (event, { filePath, ditherType }) => {
 });
 
 ipcMain.handle('get-png-files', async (event, directory) => {
-    return conversionService.getPngFiles(directory);
+    return await conversionService.getPngFiles(directory);
+});
+
+// Новый обработчик для конвертации одной группы
+ipcMain.handle('convert-group', async (event, { groupName, files, settings, outputDirectory }) => {
+    try {
+        const result = await conversionService.convertToGif(groupName, files, outputDirectory, settings);
+        return result;
+    } catch (error) {
+        console.error(`Ошибка конвертации группы ${groupName}:`, error);
+        throw error;
+    }
 });
 
 ipcMain.handle('path-join', async (event, ...args) => {
     return path.join(...args);
 });
 
-ipcMain.handle('convert-to-gif', async (event, args) => {
-    const { groupName, files, outputDir, ...settings } = args;
-    return await conversionService.convertToGif(groupName, files, outputDir, settings);
+// Новый обработчик для запуска всей конвертации
+ipcMain.handle('start-conversion', async (event, { groupedFiles, outputDirectory, settings }) => {
+    const conversionResults = [];
+    const sessionLog = [];
+    const groupNames = Object.keys(groupedFiles);
+    let completedCount = 0;
+
+    // Создаем директорию для результатов сессии
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const sessionOutputDir = path.join(outputDirectory, `Результаты конвертации - ${timestamp}`);
+    fs.mkdirSync(sessionOutputDir, { recursive: true });
+
+    for (const groupName of groupNames) {
+        const files = groupedFiles[groupName];
+        // Отправляем прогресс на рендерер
+        event.sender.send('conversion:progress', { groupName: groupName, status: 'Начинаем конвертацию...' });
+        sessionLog.push(`[ПРОГРЕСС] Начинаем конвертацию группы: ${groupName}`);
+
+        try {
+            const result = await conversionService.convertToGif(groupName, files, sessionOutputDir, settings);
+            conversionResults.push(result);
+            sessionLog.push(...result.logMessages || []);
+            if (result.success) {
+                completedCount++;
+                event.sender.send('conversion:progress', { groupName: groupName, status: 'Успешно завершено.' });
+                sessionLog.push(`[УСПЕХ] Группа ${groupName} успешно сконвертирована.`);
+            } else {
+                event.sender.send('conversion:progress', { groupName: groupName, status: `Ошибка: ${result.error}` });
+                sessionLog.push(`[ОШИБКА] Группа ${groupName} ошибка: ${result.error}`);
+            }
+        } catch (error) {
+            console.error(`Ошибка при конвертации группы ${groupName}:`, error);
+            conversionResults.push({ success: false, groupName: groupName, error: error.message });
+            event.sender.send('conversion:progress', { groupName: groupName, status: `Критическая ошибка: ${error.message}` });
+            sessionLog.push(`[КРИТИЧЕСКАЯ ОШИБКА] Группа ${groupName} ошибка: ${error.message}`);
+        }
+    }
+
+    return { results: conversionResults, log: sessionLog, outputDirectory: sessionOutputDir };
 });
 
-ipcMain.handle('open-folder', (event, folderPath) => {
+// Обработчик для открытия папки
+ipcMain.handle('open-output-folder', (event, folderPath) => {
     shell.openPath(folderPath);
 });
 
@@ -116,29 +161,26 @@ ipcMain.handle('open-folder', (event, folderPath) => {
 // УЛУЧШЕННЫЙ ОБРАБОТЧИК СОХРАНЕНИЯ ОТЧЕТА
 // ================================================================================
 
-ipcMain.handle('save-log', (event, { logContent, directory }) => {
-    if (!logContent || !directory) {
+ipcMain.handle('save-report', (event, logContent, sessionStart, selectedDirectory) => {
+    if (!logContent) {
         console.error('[REPORT] Недостаточно данных для сохранения отчета');
         return { success: false, error: 'Недостаточно данных' };
     }
     
     try {
-        // Убедимся, что директория для отчета существует.
-        // { recursive: true } создаст все необходимые родительские директории.
-        fs.mkdirSync(directory, { recursive: true });
+        // Создаем директорию для отчета внутри выбранной папки
+        const timestamp = new Date(sessionStart).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const reportDir = path.join(selectedDirectory, `Отчеты конвертации`);
+        fs.mkdirSync(reportDir, { recursive: true });
 
-        // Создаем красивое имя файла с временной меткой
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const logPath = path.join(directory, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);
+        const logPath = path.join(reportDir, `ОТЧЕТ_КОНВЕРТАЦИИ_${timestamp}.txt`);
         
-        // Записываем отчет в UTF-8 с BOM для лучшей совместимости
         const BOM = '\uFEFF';
         fs.writeFileSync(logPath, BOM + logContent, 'utf-8');
         
         console.log(`[REPORT] Детальный отчет сохранен: ${logPath}`);
         
-        // Также сохраняем краткую версию для быстрого просмотра
-        const summaryPath = path.join(directory, 'КРАТКИЙ_ОТЧЕТ.txt');
+        const summaryPath = path.join(reportDir, `КРАТКИЙ_ОТЧЕТ_${timestamp}.txt`);
         const summaryContent = generateQuickSummary(logContent);
         fs.writeFileSync(summaryPath, BOM + summaryContent, 'utf-8');
         
@@ -165,7 +207,8 @@ ipcMain.handle('save-log', (event, { logContent, directory }) => {
 ipcMain.handle('get-config', () => {
     const configPath = path.join(__dirname, 'config.json');
     const defaultConfig = { 
-        frameDelay: 5,
+        frameDelay: 3,
+        maxSizeKb: 510,
         colorCount: 256
     };
 
