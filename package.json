@@ -5,7 +5,10 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron src/main/main.js",
+    "start:react": "electron src/main/main.js --react",
     "dev": "npm start",
+    "dev:react": "npm run start:react",
+    "build:react": "webpack --mode=production",
     "build": "electron-builder",
     "build-win": "electron-builder --win",
     "build-mac": "electron-builder --mac --arm64",
@@ -18,13 +21,26 @@
     "electron-builder": "^24.4.0"
   },
   "dependencies": {
+    "@babel/core": "^7.27.4",
+    "@babel/preset-env": "^7.27.2",
+    "@babel/preset-react": "^7.27.1",
+    "babel-loader": "^10.0.0",
+    "css-loader": "^7.1.2",
     "electron-is-dev": "^2.0.0",
     "gif-encoder-2": "^1.0.5",
+    "html-webpack-plugin": "^5.6.3",
     "image-js": "^0.35.3",
     "png-file-stream": "^1.2.1",
     "png-js": "^1.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "sharp": "^0.32.6",
-    "tiny-compressor": "^1.0.3"
+    "style-loader": "^4.0.0",
+    "styled-components": "^6.1.19",
+    "tiny-compressor": "^1.0.3",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
   },
   "build": {
     "appId": "com.png-to-gif-converter",

@@ -118,9 +118,27 @@ const electronAPI = {
     
     onConversionProgress: (callback) => ipcRenderer.on('conversion:progress', (_event, value) => callback(value)),
     onConversionComplete: (callback) => ipcRenderer.on('conversion:complete', (_event, value) => callback(value)),
-    showItemInFolder: (filePath) => ipcRenderer.send('app:show-item-in-folder', filePath),
-    openPath: (path) => ipcRenderer.send('app:open-path', path),
-    openExternal: (url) => ipcRenderer.send('app:open-external', url),
+    
+    // Обновленные методы для React версии
+    showItemInFolder: (filePath) => {
+        console.log('[PRELOAD] Вызов showItemInFolder с путем:', filePath);
+        return safeIpcInvoke('show-item-in-folder', filePath);
+    },
+    openPath: (pathToOpen) => {
+        console.log('[PRELOAD] Вызов openPath с путем:', pathToOpen);
+        return safeIpcInvoke('open-path', pathToOpen);
+    },
+    openExternal: (url) => {
+        console.log('[PRELOAD] Вызов openExternal с URL:', url);
+        return safeIpcInvoke('open-external', url);
+    },
+    
+    // Обратная совместимость с обычной версией
+    _legacy: {
+        showItemInFolder: (filePath) => ipcRenderer.send('app:show-item-in-folder', filePath),
+        openPath: (path) => ipcRenderer.send('app:open-path', path),
+        openExternal: (url) => ipcRenderer.send('app:open-external', url),
+    }
 };
 
 // Проверяем доступность contextBridge

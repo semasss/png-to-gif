@@ -3,8 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 const conversionService = require('../core/conversion-service');
+const { spawn } = require('child_process');
 
 let mainWindow;
+let isReactMode = false; // По умолчанию используем обычную версию
 
 // ================================================================================
 // ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КРАТКОГО ОТЧЕТА
@@ -40,22 +42,77 @@ function generateQuickSummary(fullReport) {
 // ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ
 // ================================================================================
 
-function createWindow() {
+// Функция для сборки React версии
+function buildReactApp() {
+    return new Promise((resolve, reject) => {
+        console.log('[BUILD] Сборка React версии...');
+        const webpack = spawn('npx', ['webpack', '--mode=development'], {
+            cwd: path.join(__dirname, '..', '..'),
+            stdio: 'inherit'
+        });
+        
+        webpack.on('close', (code) => {
+            if (code === 0) {
+                console.log('[BUILD] React версия собрана успешно');
+                resolve();
+            } else {
+                console.error('[BUILD] Ошибка сборки React версии');
+                reject(new Error(`Webpack завершился с кодом ${code}`));
+            }
+        });
+    });
+}
+
+async function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 800,
-        height: 600,
+        width: 900,
+        height: 800,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, '..', 'preload', 'preload.js')
+            preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+            webSecurity: false // Нужно для загрузки файлов через file://
         }
     });
 
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+    // Проверяем аргументы командной строки для выбора версии
+    if (process.argv.includes('--react')) {
+        isReactMode = true;
+    }
+
+    if (isReactMode) {
+        try {
+            // Собираем React версию если нужно
+            const reactBuildPath = path.join(__dirname, '..', '..', 'dist', 'react', 'index.html');
+            if (!fs.existsSync(reactBuildPath) || isDev) {
+                await buildReactApp();
+            }
+            
+            console.log('[WINDOW] Загружаем React версию');
+            mainWindow.loadFile(reactBuildPath);
+        } catch (error) {
+            console.error('[WINDOW] Ошибка загрузки React версии, переключаемся на обычную:', error);
+            isReactMode = false;
+            mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+        }
+    } else {
+        console.log('[WINDOW] Загружаем обычную версию');
+        mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+    }
 
     if (isDev) {
         mainWindow.webContents.openDevTools();
     }
+
+    // Добавляем меню для переключения версий
+    mainWindow.webContents.on('did-finish-load', () => {
+        if (isDev) {
+            mainWindow.webContents.executeJavaScript(`
+                console.log('Текущая версия: ${isReactMode ? 'React' : 'Vanilla'}');
+                console.log('Для переключения на React версию запустите с флагом --react');
+            `);
+        }
+    });
 }
 
 app.whenReady().then(createWindow);
@@ -205,6 +262,25 @@ ipcMain.handle('get-file-info', (event, filePath) => {
     }
 });
 
+ipcMain.handle('show-item-in-folder', (event, filePath) => {
+    if (filePath) {
+        shell.showItemInFolder(filePath);
+    }
+});
+
+ipcMain.handle('open-path', (event, pathToOpen) => {
+    if (pathToOpen) {
+        shell.openPath(pathToOpen);
+    }
+});
+
+ipcMain.handle('open-external', (event, url) => {
+    if (url) {
+        shell.openExternal(url);
+    }
+});
+
+// Добавляем обработчики для старого формата (на случай совместимости)
 ipcMain.on('app:show-item-in-folder', (event, filePath) => {
     if (filePath) {
         shell.showItemInFolder(filePath);
