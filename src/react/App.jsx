@@ -5,8 +5,10 @@ import Input from './components/Input';
 import Card from './components/Card';
 import { Section, TitleRow, Title, Subtitle } from './components/Section';
 import ProgressBar from './components/ProgressBar';
-import { Arrow, Folder } from './components/Icons';
-import { lightTheme, darkTheme, GlobalStyle } from './theme';
+import Modal from './components/Modal';
+import HelpModal from './components/HelpModal';
+// import { Arrow, Folder } from './components/Icons'; // Убрали иконки
+import { lightTheme, darkTheme, brightTheme, GlobalStyle } from './theme';
 
 const Container = styled.div`
   width: 768px;
@@ -67,7 +69,7 @@ const TinyPreview = styled.img`
 
 const GroupsInfo = styled.p`
   font-size: 15px;
-  margin-bottom: 16px;
+  margin: 16px 0 16px 0;
   color: ${props => props.theme.colors.textSecondary};
 `;
 
@@ -105,43 +107,127 @@ const StatusMessage = styled.div`
   }
 `;
 
+const Footer = styled.footer`
+  text-align: center;
+  margin-top: 40px;
+  padding: 20px;
+`;
+
+const AboutLink = styled.a`
+  color: ${props => props.theme.colors.textSecondary};
+  text-decoration: none;
+  font-size: 13px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  cursor: pointer;
+  
+  &:hover {
+    opacity: 1;
+    text-decoration: underline;
+  }
+`;
+
+const HelpButton = styled.button`
+  background: transparent;
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: ${props => props.theme.colors.textSecondary};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  
+  &:hover {
+    background: ${props => props.theme.colors.primaryLight};
+    color: ${props => props.theme.colors.primary};
+    border-color: ${props => props.theme.colors.primary};
+  }
+`;
+
+const NoGroupsMessage = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  text-align: center;
+  
+  h4 {
+    color: ${props => props.theme.colors.text};
+    margin: 0 0 12px 0;
+    font-size: 16px;
+  }
+  
+  p {
+    color: ${props => props.theme.colors.textSecondary};
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  
+  .example {
+    background: ${props => props.theme.colors.border}30;
+    padding: 8px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 13px;
+    color: ${props => props.theme.colors.text};
+    margin: 12px 0;
+  }
+`;
+
 function App() {
   // State
   const [selectedDirectory, setSelectedDirectory] = useState('');
   const [groupedFiles, setGroupedFiles] = useState({});
   const [frameDelay, setFrameDelay] = useState(3);
+  const [maxFileSize, setMaxFileSize] = useState(510);
   const [conversionResults, setConversionResults] = useState([]);
   const [isConverting, setIsConverting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTask: '' });
-  const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
   const [isDarkMode, setIsDarkMode] = useState(
     window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
   );
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [brightMode, setBrightMode] = useState(false); // отдельно от dark/light
+  const resultsRef = React.useRef(null);
 
   // Check for electronAPI on mount and listen to theme changes
   useEffect(() => {
-    if (!window.electronAPI) {
-      setStatusMessage({
-        text: 'Ошибка: electronAPI недоступен. Убедитесь, что приложение запущено в Electron.',
-        type: 'error'
-      });
-    }
-
     // Listen for theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e) => setIsDarkMode(e.matches);
     
     mediaQuery.addListener(handleChange);
+    
+    // Принудительно загружаем Comic Sans шрифт
+    const font = new FontFace('Comic Sans MS Custom', 'url("./assets/ComicSansMS.ttf")');
+    font.load().then(() => {
+      document.fonts.add(font);
+      console.log('✅ Comic Sans MS Custom загружен успешно');
+    }).catch(err => {
+      console.error('❌ Ошибка загрузки Comic Sans:', err);
+    });
+    
     return () => mediaQuery.removeListener(handleChange);
   }, []);
+
+  // Bright theme easter egg effect
+  useEffect(() => {
+    if (logoClickCount >= 10 && !brightMode) {
+      setBrightMode(true);
+      console.log('🎉 Активируем режим "Просто будь ярким"!');
+    }
+  }, [logoClickCount, brightMode]);
 
   // Handlers
   const handleChooseDirectory = async () => {
     if (!window.electronAPI) return;
     
     try {
-      setStatusMessage({ text: 'Выбор папки...', type: 'info' });
-      
       const result = await window.electronAPI.chooseDirectory();
       
       if (result && result.success && result.path) {
@@ -152,32 +238,28 @@ function App() {
         
         if (files && files.success && files.groups) {
           setGroupedFiles(files.groups);
-          setStatusMessage({
-            text: `Найдено ${Object.keys(files.groups).length} групп файлов`,
-            type: 'success'
-          });
-        } else {
-          const errorMsg = files?.error || 'Неизвестная ошибка при получении файлов';
-          setStatusMessage({ text: `Ошибка: ${errorMsg}`, type: 'error' });
         }
-      } else if (result && result.error) {
-        setStatusMessage({ text: `Ошибка выбора папки: ${result.error}`, type: 'error' });
       }
     } catch (error) {
-      setStatusMessage({ text: `Критическая ошибка: ${error.message}`, type: 'error' });
+      console.error('Ошибка выбора папки:', error);
     }
   };
 
   const handleReset = () => {
     setFrameDelay(3);
+    setMaxFileSize(510);
     setSelectedDirectory('');
     setGroupedFiles({});
     setConversionResults([]);
-    setStatusMessage({ text: 'Настройки сброшены', type: 'success' });
   };
 
   const handleConvert = async () => {
     if (!window.electronAPI || !selectedDirectory) return;
+    
+    // Basic validation - just return if invalid
+    if (isNaN(frameDelay) || frameDelay < 0.01 || isNaN(maxFileSize) || maxFileSize < 10) {
+      return;
+    }
     
     setIsConverting(true);
     setConversionResults([]);
@@ -204,7 +286,7 @@ function App() {
             files: files,
             outputDir: selectedDirectory,
             frameDelay: frameDelay,
-            maxKb: 510,
+            maxKb: maxFileSize,
             sessionOutputDir: sessionOutputDir,
           });
           
@@ -230,38 +312,15 @@ function App() {
       
       setConversionResults(results);
       
-      // Set final status message
-      const warningCount = results.filter(r => r.success && r.warning).length;
-      const successCount = results.filter(r => r.success).length;
-      
-      if (successCount === totalGroups && warningCount === 0) {
-        setStatusMessage({
-          text: `Успешно сконвертировано ${successCount} групп файлов!`,
-          type: 'success'
-        });
-      } else if (successCount === totalGroups && warningCount > 0) {
-        setStatusMessage({
-          text: `Успешно сконвертировано ${successCount} групп! (${warningCount} с предупреждениями)`,
-          type: 'warning'
-        });
-      } else if (successCount > 0) {
-        const warningMsg = warningCount > 0 ? ` (${warningCount} с предупреждениями)` : '';
-        setStatusMessage({
-          text: `Сконвертировано ${successCount} из ${totalGroups} групп${warningMsg}`,
-          type: 'warning'
-        });
-      } else {
-        setStatusMessage({
-          text: 'Не удалось сконвертировать ни одной группы',
-          type: 'error'
-        });
+      // Scroll to results section
+      if (resultsRef.current) {
+        resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
       
+      // Conversion complete - results shown in UI
+      
     } catch (error) {
-      setStatusMessage({
-        text: `Критическая ошибка конвертации: ${error.message}`,
-        type: 'error'
-      });
+      console.error('Критическая ошибка конвертации:', error);
     } finally {
       setIsConverting(false);
     }
@@ -282,6 +341,27 @@ function App() {
     }
   };
 
+  const handleAboutClick = (e) => {
+    e.preventDefault();
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+  };
+
+  const handleHelpClick = () => {
+    setIsHelpModalOpen(true);
+  };
+
+  const handleCloseHelpModal = () => {
+    setIsHelpModalOpen(false);
+  };
+
+  const handleLogoClick = () => {
+    setLogoClickCount(prev => prev + 1);
+  };
+
   // Helper functions
   const getDisplayFolderName = () => {
     if (!selectedDirectory) return '';
@@ -291,36 +371,55 @@ function App() {
   const groupsCount = Object.keys(groupedFiles).length;
   const canConvert = selectedDirectory && groupsCount > 0 && !isConverting;
 
+  // Determine current theme
+  const getCurrentTheme = () => {
+    if (brightMode) return brightTheme;
+    return isDarkMode ? darkTheme : lightTheme; // обычное системное определение
+  };
+
   return (
-    <ThemeProvider theme={isDarkMode ? darkTheme : lightTheme}>
+    <ThemeProvider theme={getCurrentTheme()}>
       <GlobalStyle />
       <Container>
-      {/* Status Message */}
-      {statusMessage.text && (
-        <StatusMessage className={statusMessage.type}>
-          {statusMessage.text}
-        </StatusMessage>
-      )}
 
       {/* Data Section */}
       <Section>
         <TitleRow>
           <Title>Данные</Title>
         </TitleRow>
-        <Subtitle>Выбери папку в которой есть изображения</Subtitle>
+        <Subtitle>
+          Выбери папку в которой есть изображения
+          <HelpButton onClick={handleHelpClick}>как это работает?</HelpButton>
+        </Subtitle>
         <FolderButton 
           chosen={!!selectedDirectory}
           onClick={handleChooseDirectory}
           disabled={isConverting}
         >
           {getDisplayFolderName() || 'Выбор папки'}
-          <Arrow />
+          <span style={{ opacity: 0.7, fontSize: '18px' }}>{'→'}</span>
         </FolderButton>
+        
+        {selectedDirectory && groupsCount === 0 && (
+          <NoGroupsMessage>
+            <h4>Подходящие файлы не найдены</h4>
+            <p>Программа ищет PNG-файлы с определенным названием для создания анимации.</p>
+            <div className="example">
+              Пример правильных названий:<br/>
+              run_1.png, run_2.png, run_3.png<br/>
+              walk_1.png, walk_2.png<br/>
+              explosion_01.png, explosion_02.png
+            </div>
+            <p>Файлы должны содержать подчеркивание и номер перед расширением .png</p>
+            <HelpButton onClick={handleHelpClick}>подробная справка</HelpButton>
+          </NoGroupsMessage>
+        )}
         
         {groupsCount > 0 && (
           <>
             <GroupsInfo>
               В папке нашлось {groupsCount} групп изображений
+              <HelpButton onClick={handleHelpClick}>тут нет нужного файла?</HelpButton>
             </GroupsInfo>
             <GroupsList>
               {Object.entries(groupedFiles).slice(0, 10).map(([groupName, files]) => (
@@ -362,10 +461,12 @@ function App() {
           <Input
             label="Максимальный вес"
             type="number"
-            value={510}
+            value={maxFileSize}
+            onChange={(e) => setMaxFileSize(Number(e.target.value))}
             suffix="Кб"
-            disabled
-            style={{ opacity: 0.6 }}
+            min="10"
+            step="10"
+            disabled={isConverting}
           />
         </Fields>
         <Button 
@@ -376,7 +477,6 @@ function App() {
           onClick={handleConvert}
         >
           Жмахнуть ЖИФ
-          <Arrow />
         </Button>
         
         <ProgressBar
@@ -389,13 +489,12 @@ function App() {
 
       {/* Results Section */}
       {conversionResults.length > 0 && (
-        <Section>
+        <Section ref={resultsRef}>
           <TitleRow>
             <Title>
               Сконвертировано {conversionResults.filter(r => r.success).length} гифов
             </Title>
             <Button secondary onClick={handleOpenOutputFolder}>
-              <Folder />
               Открыть папку
             </Button>
           </TitleRow>
@@ -410,13 +509,32 @@ function App() {
                 path={result.path}
                 warning={result.warning}
                 error={result.success ? null : result.error}
+                frameCount={result.frameCount}
+                frameDelay={frameDelay}
                 onShowInFolder={result.success ? () => handleShowInFolder(result.path) : null}
               />
             ))}
           </ResultsGrid>
         </Section>
       )}
+
+      {/* Footer */}
+      <Footer>
+        <AboutLink onClick={handleAboutClick}>о программе</AboutLink>
+      </Footer>
       </Container>
+
+      {/* About Modal */}
+      <Modal 
+        visible={isModalOpen} 
+        onClose={handleCloseModal} 
+        onLogoClick={handleLogoClick}
+        clickCount={logoClickCount}
+        brightMode={brightMode}
+      />
+      
+      {/* Help Modal */}
+      <HelpModal visible={isHelpModalOpen} onClose={handleCloseHelpModal} />
     </ThemeProvider>
   );
 }

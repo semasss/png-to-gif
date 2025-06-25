@@ -1,6 +1,6 @@
 import React from 'react';
 import styled, { css } from 'styled-components';
-import { Warning, Check, Error, Folder } from './Icons';
+// import { Warning, Check, Error, Folder } from './Icons'; // Убрали иконки
 
 const CardContainer = styled.div`
   display: flex;
@@ -103,21 +103,23 @@ const Actions = styled.div`
 `;
 
 const ActionButton = styled.button`
-  background: ${props => props.theme.colors.primaryLight};
+  background: transparent;
   border: 1px solid ${props => props.theme.colors.border};
   border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: ${props => props.theme.colors.primary};
+  padding: 6px 10px;
+  font-size: 12px;
+  color: ${props => props.theme.colors.textSecondary};
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   gap: 4px;
+  opacity: 0.7;
   
   &:hover {
     background: ${props => props.theme.colors.primaryLight};
-    opacity: 0.8;
+    color: ${props => props.theme.colors.primary};
+    opacity: 1;
     border-color: ${props => props.theme.colors.primary};
   }
 `;
@@ -129,17 +131,30 @@ function Card({
   quality, 
   path, 
   warning, 
-  error, 
+  error,
+  frameCount,
+  frameDelay,
   onShowInFolder 
 }) {
   const formatSize = (bytes) => {
     return `${(bytes / 1024).toFixed(1)} КБ`;
   };
 
+  const getDuration = () => {
+    if (!frameCount || !frameDelay) return null;
+    return (frameCount * frameDelay).toFixed(1);
+  };
+
+  const getColorCount = () => {
+    if (!quality) return null;
+    const match = quality.match(/colors=(\d+)/);
+    return match ? match[1] : null;
+  };
+
   const getStatusIcon = () => {
-    if (error) return <Error />;
-    if (warning) return <Warning />;
-    return <Check />;
+    if (error) return '❌';
+    if (warning) return '⚠️';
+    return null; // Убираем ✅ иконку
   };
 
   return (
@@ -156,29 +171,29 @@ function Card({
       
       <Info>
         <Name warning={warning} error={error}>
-          {getStatusIcon()}
+          {getStatusIcon() && <span>{getStatusIcon()}</span>}
           {name}
         </Name>
         
         {!error && (
-          <>
-            <Meta>Размер: {formatSize(size)}</Meta>
-            <Meta>Размеры: {dimensions.width || 'N/A'}x{dimensions.height || 'N/A'}</Meta>
-            <Meta>Качество: {quality || 'Авто'}</Meta>
-          </>
+          <Meta>
+            {formatSize(size)}
+            {frameCount && `, ${frameCount} кадра`}
+            {getDuration() && `, ${getDuration()} сек`}
+            {dimensions.width && dimensions.height && `, ${dimensions.width}×${dimensions.height}`}
+            {getColorCount() && `, ${getColorCount()} цветов`}
+          </Meta>
         )}
         
         {warning && (
           <WarningMessage>
-            <Warning />
-            {warning}
+            ⚠️ {warning}
           </WarningMessage>
         )}
         
         {error && (
           <ErrorMessage>
-            <Error />
-            Ошибка: {error}
+            ❌ Ошибка: {error}
           </ErrorMessage>
         )}
       </Info>
@@ -186,8 +201,7 @@ function Card({
       {!error && onShowInFolder && (
         <Actions>
           <ActionButton onClick={onShowInFolder}>
-            <Folder />
-            Показать в проводнике
+            показать файл
           </ActionButton>
         </Actions>
       )}

@@ -135,17 +135,25 @@ function getPngFiles(directory) {
 
         const groups = {};
         imageFiles.forEach(file => {
-            const baseName = file.replace(/[\d_]+\.png$/i, '').replace(/\.png$/i, '');
+            // Извлекаем всё до _цифра.png
+            const match = file.match(/^(.+)_\d+\.png$/i);
+            const baseName = match ? match[1] : file.replace(/\.png$/i, '');
             if (!groups[baseName]) groups[baseName] = [];
             groups[baseName].push({ name: file, path: path.join(directory, file) });
         });
 
+        // Сортируем файлы в группах и удаляем одиночные файлы
         for (const group in groups) {
             groups[group].sort((a, b) => {
                 const numA = parseInt(a.name.match(/\d+/)?.[0] || '0');
                 const numB = parseInt(b.name.match(/\d+/)?.[0] || '0');
                 return numA - numB;
             });
+            
+            // Удаляем группы с одним файлом
+            if (groups[group].length < 2) {
+                delete groups[group];
+            }
         }
 
         return { success: true, groups };
@@ -310,7 +318,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
                 log('Успех! Уложились в лимит размером палитры.');
                 cleanupFiles(rawGifPath, optimizedPath);
                 const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors}` };
+                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors}`, frameCount: imagePaths.length };
             }
         }
         
@@ -338,7 +346,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
                 log('Успех! Уложились в лимит с lossy-сжатием.');
                 cleanupFiles(rawGifPath, optimizedPath);
                 const finalStats = fs.statSync(finalOutputPath);
-                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors||256}, lossy=${bestLossy}` };
+                return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width, height }, quality: `colors=${bestColors||256}, lossy=${bestLossy}`, frameCount: imagePaths.length };
             }
         }
         
@@ -394,7 +402,7 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
                     fs.renameSync(scaledPath, finalOutputPath);
                     cleanupFiles(rawGifPath, optimizedPath);
                     const finalStats = fs.statSync(finalOutputPath);
-                    return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: newHeight }, quality: `scaled` };
+                    return { success: true, path: finalOutputPath, groupName, size: finalStats.size, dimensions: { width: newWidth, height: newHeight }, quality: `scaled`, frameCount: imagePaths.length };
                 } else if (scaledStats.size < bestAttemptSize) {
                     // Масштабированный результат лучше, но все еще превышает лимит
                     bestAttemptPath = scaledPath;
@@ -410,9 +418,14 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
             }
         }
 
-        // Сохраняем лучший результат с предупреждением
+        // Сохраняем лучший результат
         if (bestAttemptPath && fs.existsSync(bestAttemptPath)) {
-            log(`[ПРЕДУПРЕЖДЕНИЕ] Сохраняем лучший результат: ${(bestAttemptSize / 1024).toFixed(0)} KB > ${maxKb} KB`);
+            const exceeds = bestAttemptSize > maxBytes;
+            if (exceeds) {
+                log(`[ПРЕДУПРЕЖДЕНИЕ] Сохраняем лучший результат: ${(bestAttemptSize / 1024).toFixed(0)} KB > ${maxKb} KB`);
+            } else {
+                log(`[УСПЕХ] Сохраняем результат: ${(bestAttemptSize / 1024).toFixed(0)} KB <= ${maxKb} KB`);
+            }
             
             // Перемещаем лучший результат в финальное место, если нужно
             if (bestAttemptPath !== finalOutputPath) {
@@ -421,15 +434,22 @@ async function convertToGif(groupName, pngFilePaths, outputDir, settings) {
             }
             
             cleanupFiles(rawGifPath, optimizedPath);
-            return { 
+            const result = { 
                 success: true, 
                 path: finalOutputPath, 
                 groupName, 
                 size: bestAttemptSize, 
                 dimensions: bestAttemptInfo, 
                 quality: bestAttemptInfo.quality,
-                warning: `Размер файла ${(bestAttemptSize / 1024).toFixed(0)} KB превышает лимит ${maxKb} KB`
+                frameCount: imagePaths.length
             };
+            
+            // Добавляем предупреждение только если размер действительно превышает лимит
+            if (exceeds) {
+                result.warning = `Размер файла ${(bestAttemptSize / 1024).toFixed(0)} КБ превышает лимит ${maxKb} КБ`;
+            }
+            
+            return result;
         }
 
         cleanupFiles(rawGifPath, optimizedPath, finalOutputPath);

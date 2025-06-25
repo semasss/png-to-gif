@@ -17,8 +17,10 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "copy-webpack-plugin": "^13.0.0",
     "electron": "^28.0.0",
-    "electron-builder": "^24.4.0"
+    "electron-builder": "^24.4.0",
+    "gifsicle": "^7.0.1"
   },
   "dependencies": {
     "@babel/core": "^7.27.4",

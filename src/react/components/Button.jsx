@@ -17,6 +17,7 @@ const Button = styled.button`
   ${props => props.primary && css`
     background: linear-gradient(90deg, ${props.theme.colors.primary} 0%, ${props.theme.colors.primaryDark} 100%);
     color: #ffffff;
+    ${props.theme.colors.brightAnimation ? `animation: ${props.theme.colors.brightAnimation};` : ''}
     
     &:hover:not(:disabled) {
       opacity: 0.9;
