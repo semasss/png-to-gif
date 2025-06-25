@@ -1,6 +1,7 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const webpack = require('webpack');
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production';
@@ -11,7 +12,8 @@ module.exports = (env, argv) => {
     entry: './src/react/index.jsx',
     output: {
       path: path.resolve(__dirname, 'dist/react'),
-      filename: isProduction ? 'bundle.[contenthash].js' : 'bundle.js',
+      filename: isProduction ? 'bundle.[name].[contenthash].js' : 'bundle.js',
+      publicPath: './',
       clean: true,
     },
   module: {
@@ -47,6 +49,13 @@ module.exports = (env, argv) => {
           to: 'assets'
         }
       ]
+    }),
+    new webpack.DefinePlugin({
+      global: 'globalThis',
+      'process.env.WEBPACK_BUILD': JSON.stringify(Date.now())
+    }),
+    new webpack.ProvidePlugin({
+      global: 'globalThis',
     })
   ],
   devtool: isProduction ? false : 'source-map',

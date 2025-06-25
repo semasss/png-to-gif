@@ -1,15 +1,5 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';">
-  <title>ЖИФ</title>
-  <script>
-    // Polyfill for global variable in Electron
-    window.global = window.globalThis;
-  </script>
-  <style>
-    /* Preloader styles */
+<!doctype html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';"><title>ЖИФ</title><script>// Polyfill for global variable in Electron
+    window.global = window.globalThis;</script><style>/* Preloader styles */
     .preloader {
       position: fixed;
       top: 0;
@@ -47,19 +37,7 @@
         border-color: rgba(255, 255, 255, 0.1);
         border-top-color: #0a84ff;
       }
-    }
-  </style>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-</head>
-<body>
-  <div class="preloader" id="preloader">
-    <div class="spinner"></div>
-  </div>
-  <div id="root"></div>
-  <script>
-    // Hide preloader when React is ready
+    }</style><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><script defer="defer" src="./bundle.vendors.390944cc9c88f49e0b13.js"></script><script defer="defer" src="./bundle.main.9c4c4db00512bce96934.js"></script></head><body><div class="preloader" id="preloader"><div class="spinner"></div></div><div id="root"></div><script>// Hide preloader when React is ready
     window.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         const preloader = document.getElementById('preloader');
@@ -70,7 +48,4 @@
           }, 300);
         }
       }, 500);
-    });
-  </script>
-</body>
-</html>
+    });</script></body></html>

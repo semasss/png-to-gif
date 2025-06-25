@@ -65,25 +65,33 @@ function buildReactApp() {
 
 async function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 900,
-        height: 800,
+        width: 750,
+        height: 650,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, '..', 'preload', 'preload.js'),
             webSecurity: false // Нужно для загрузки файлов через file://
-        }
+        },
+        show: false // Скрываем окно до полной загрузки
     });
 
     // Всегда используем React версию
     try {
-        // Собираем React версию если нужно
-        const reactBuildPath = path.join(__dirname, '..', '..', 'dist', 'react', 'index.html');
-        if (!fs.existsSync(reactBuildPath) || isDev) {
-            await buildReactApp();
+        let reactBuildPath;
+        
+        if (isDev) {
+            // В разработке собираем и загружаем из dist/react
+            reactBuildPath = path.join(__dirname, '..', '..', 'dist', 'react', 'index.html');
+            if (!fs.existsSync(reactBuildPath)) {
+                await buildReactApp();
+            }
+        } else {
+            // В продакшене загружаем из renderer/index.html внутри app.asar
+            reactBuildPath = path.join(__dirname, '..', 'renderer', 'index.html');
         }
         
-        console.log('[WINDOW] Загружаем React версию');
+        console.log('[WINDOW] Загружаем React версию из:', reactBuildPath);
         mainWindow.loadFile(reactBuildPath);
     } catch (error) {
         console.error('[WINDOW] Критическая ошибка загрузки React версии:', error);
@@ -93,14 +101,24 @@ async function createWindow() {
     if (isDev) {
         mainWindow.webContents.openDevTools();
     }
+    
 
-    // Уведомляем о загрузке React версии
+    // Показываем окно когда React полностью загружен
     mainWindow.webContents.on('did-finish-load', () => {
-        if (isDev) {
-            mainWindow.webContents.executeJavaScript(`
-                console.log('Загружена React версия приложения');
-            `);
-        }
+        console.log('[WINDOW] React загружен, показываем окно');
+        // Небольшая задержка для завершения рендеринга
+        setTimeout(() => {
+            mainWindow.show();
+            mainWindow.focus();
+        }, 100);
+    });
+
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        console.error('[WINDOW] did-fail-load:', errorCode, errorDescription);
+    });
+
+    mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        console.log(`[RENDERER CONSOLE] ${level}: ${message} (${sourceId}:${line})`);
     });
 }
 
